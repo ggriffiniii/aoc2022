@@ -28,14 +28,14 @@ impl FromStr for Stacks {
     type Err = Infallible;
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
-        let mut stacks = Vec::new();
+        let mut stacks = Vec::with_capacity(10);
         for line in input.lines().rev().skip(1) {
             for (stack_idx, crt) in line.as_bytes().chunks(4).map(|c| c[1] as char).enumerate() {
                 if crt == ' ' {
                     continue;
                 }
                 if stack_idx >= stacks.len() {
-                    stacks.resize(stack_idx + 1, Vec::new());
+                    stacks.resize(stack_idx + 1, Vec::with_capacity(10));
                 }
                 stacks[stack_idx].push(crt);
             }
@@ -50,18 +50,51 @@ struct Move {
     from_stack_idx: usize,
     to_stack_idx: usize,
 }
-impl FromStr for Move {
-    type Err = Infallible;
 
-    fn from_str(input: &str) -> Result<Self, Self::Err> {
-        let input = input.strip_prefix("move ").unwrap_or(input);
-        let (quantity, input) = input.split_once(" from ").unwrap();
-        let (from_stack, to_stack) = input.split_once(" to ").unwrap();
-        Ok(Move {
-            quantity: quantity.parse().unwrap(),
-            from_stack_idx: from_stack.parse::<usize>().unwrap() - 1,
-            to_stack_idx: to_stack.parse::<usize>().unwrap() - 1,
+struct MovesIter<'a>(NumIter<'a>);
+impl<'a> MovesIter<'a> {
+    fn new(input: &'a str) -> Self {
+        MovesIter(NumIter(input.bytes()))
+    }
+}
+impl<'a> Iterator for MovesIter<'a> {
+    type Item = Move;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        Some(Move {
+            quantity: self.0.next()?,
+            from_stack_idx: self.0.next()? - 1,
+            to_stack_idx: self.0.next()? - 1,
         })
+    }
+}
+
+struct NumIter<'a>(std::str::Bytes<'a>);
+impl<'a> Iterator for NumIter<'a> {
+    type Item = usize;
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut found_digit = false;
+        let mut num = 0usize;
+        loop {
+            match self.0.next() {
+                None => {
+                    if found_digit {
+                        return Some(num);
+                    }
+                    return None;
+                }
+                Some(c) if c.is_ascii_digit() => {
+                    found_digit = true;
+                    num *= 10;
+                    num += (c - b'0') as usize;
+                }
+                Some(_) => {
+                    if found_digit {
+                        return Some(num);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -69,7 +102,7 @@ impl FromStr for Move {
 pub fn part1(input: &str) -> String {
     let (stack_input, moves) = input.split_once("\n\n").unwrap();
     let mut stacks: Stacks = stack_input.parse().unwrap();
-    for mov in moves.lines().map(|m| m.parse::<Move>().unwrap()) {
+    for mov in MovesIter::new(moves) {
         let (from_stack, to_stack) =
             stacks.get_from_and_to_stacks(mov.from_stack_idx, mov.to_stack_idx);
         for _ in 0..mov.quantity {
@@ -83,7 +116,7 @@ pub fn part1(input: &str) -> String {
 pub fn part2(input: &str) -> String {
     let (stack_input, moves) = input.split_once("\n\n").unwrap();
     let mut stacks: Stacks = stack_input.parse().unwrap();
-    for mov in moves.lines().map(|m| m.parse::<Move>().unwrap()) {
+    for mov in MovesIter::new(moves) {
         let (from_stack, to_stack) =
             stacks.get_from_and_to_stacks(mov.from_stack_idx, mov.to_stack_idx);
         let offset = from_stack.len() - mov.quantity;
