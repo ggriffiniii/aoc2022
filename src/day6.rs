@@ -1,16 +1,18 @@
 use aoc_runner_derive::aoc;
 
 fn find_marker(input: &str, marker_len: usize) -> usize {
-    for (idx, window) in input.as_bytes().windows(marker_len).enumerate() {
-        let mut set = 0u32;
-        for c in window {
-            set |= 1 << (c - b'a');
-        }
-        if set.count_ones() as usize == marker_len {
-            return idx + marker_len;
-        }
-    }
-    unreachable!("uhoh");
+    input
+        .as_bytes()
+        .windows(marker_len)
+        .position(|window| {
+            window
+                .iter()
+                .fold(0u32, |accum, b| accum | 1 << b - b'a')
+                .count_ones()
+                == marker_len as u32
+        })
+        .unwrap()
+        + marker_len
 }
 
 #[aoc(day6, part1)]
