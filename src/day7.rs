@@ -2,13 +2,15 @@ use std::{convert::Infallible, str::FromStr};
 
 use aoc_runner_derive::aoc;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct Dir {
-    idx: usize,
-    parent_dir: Option<usize>,
-    child_dirs: Vec<(String, usize)>,
+    idx: DirIdx,
+    parent_dir: Option<DirIdx>,
+    child_dirs: Vec<(String, DirIdx)>,
     files: Vec<(String, usize)>,
 }
+#[derive(Debug, Copy, Clone)]
+struct DirIdx(usize);
 
 struct Filesystem(Vec<Dir>);
 impl FromStr for Filesystem {
@@ -16,12 +18,12 @@ impl FromStr for Filesystem {
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         let mut dirs = vec![Dir {
-            idx: 0,
+            idx: DirIdx(0),
             parent_dir: None,
             child_dirs: Vec::new(),
             files: Vec::new(),
         }];
-        let mut current_dir = 0;
+        let mut current_dir = DirIdx(0);
         for line in input.lines() {
             match line.split_once(' ').unwrap() {
                 ("$", cmd) => {
@@ -29,10 +31,10 @@ impl FromStr for Filesystem {
                         // do nothing
                     } else if let Some(dirname) = cmd.strip_prefix("cd ") {
                         current_dir = match dirname {
-                            "/" => 0,
-                            ".." => dirs[current_dir].parent_dir.unwrap(),
+                            "/" => DirIdx(0),
+                            ".." => dirs[current_dir.0].parent_dir.unwrap(),
                             _ => {
-                                dirs[current_dir]
+                                dirs[current_dir.0]
                                     .child_dirs
                                     .iter()
                                     .find(|(name, _idx)| name == dirname)
@@ -43,17 +45,17 @@ impl FromStr for Filesystem {
                     }
                 }
                 ("dir", name) => {
-                    let idx = dirs.len();
+                    let idx = DirIdx(dirs.len());
                     dirs.push(Dir {
                         idx,
                         parent_dir: Some(current_dir),
                         child_dirs: Vec::new(),
                         files: Vec::new(),
                     });
-                    dirs[current_dir].child_dirs.push((name.to_owned(), idx));
+                    dirs[current_dir.0].child_dirs.push((name.to_owned(), idx));
                 }
                 (size, filename) => {
-                    dirs[current_dir]
+                    dirs[current_dir.0]
                         .files
                         .push((filename.to_owned(), size.parse().unwrap()));
                 }
@@ -73,15 +75,15 @@ impl Filesystem {
     }
 
     fn size_of_dir(&self, dir: &Dir) -> usize {
-        self.0[dir.idx]
+        self.0[dir.idx.0]
             .files
             .iter()
             .map(|(_name, size)| size)
             .sum::<usize>()
-            + self.0[dir.idx]
+            + self.0[dir.idx.0]
                 .child_dirs
                 .iter()
-                .map(|(_name, idx)| self.size_of_dir(&self.0[*idx]))
+                .map(|(_name, idx)| self.size_of_dir(&self.0[idx.0]))
                 .sum::<usize>()
     }
 }
