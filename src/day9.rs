@@ -5,62 +5,9 @@ use aoc_runner_derive::aoc;
 fn adjust_tail(head: (isize, isize), tail: &mut (isize, isize)) {
     let x_diff = head.0 - tail.0;
     let y_diff = head.1 - tail.1;
-    if x_diff > 1 {
-        match y_diff.cmp(&0) {
-            Ordering::Greater => {
-                tail.0 += 1;
-                tail.1 += 1;
-            }
-            Ordering::Less => {
-                tail.0 += 1;
-                tail.1 -= 1;
-            }
-            Ordering::Equal => {
-                tail.0 += 1;
-            }
-        }
-    } else if x_diff < -1 {
-        match y_diff.cmp(&0) {
-            Ordering::Greater => {
-                tail.0 -= 1;
-                tail.1 += 1;
-            }
-            Ordering::Less => {
-                tail.0 -= 1;
-                tail.1 -= 1;
-            }
-            Ordering::Equal => {
-                tail.0 -= 1;
-            }
-        }
-    } else if y_diff > 1 {
-        match x_diff.cmp(&0) {
-            Ordering::Greater => {
-                tail.0 += 1;
-                tail.1 += 1;
-            }
-            Ordering::Less => {
-                tail.0 -= 1;
-                tail.1 += 1;
-            }
-            Ordering::Equal => {
-                tail.1 += 1;
-            }
-        }
-    } else if y_diff < -1 {
-        match x_diff.cmp(&0) {
-            Ordering::Greater => {
-                tail.0 += 1;
-                tail.1 -= 1;
-            }
-            Ordering::Less => {
-                tail.0 -= 1;
-                tail.1 -= 1;
-            }
-            Ordering::Equal => {
-                tail.1 -= 1;
-            }
-        }
+    if x_diff.abs() > 1 || y_diff.abs() > 1 {
+        tail.0 += x_diff.signum();
+        tail.1 += y_diff.signum();
     }
 }
 
