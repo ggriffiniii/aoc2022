@@ -1,3 +1,4 @@
+#![allow(clippy::identity_op)]
 use std::str::FromStr;
 
 use aoc_runner_derive::aoc;

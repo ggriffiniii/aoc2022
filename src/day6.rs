@@ -7,7 +7,7 @@ fn find_marker(input: &str, marker_len: usize) -> usize {
         .position(|window| {
             window
                 .iter()
-                .fold(0u32, |accum, b| accum | 1 << b - b'a')
+                .fold(0u32, |accum, b| accum | 1 << (b - b'a'))
                 .count_ones()
                 == marker_len as u32
         })
