@@ -78,7 +78,7 @@ pub fn part1(input: &str) -> usize {
             let (first, second) = packet_pair.split_once('\n').unwrap();
             let first = parse_list(first);
             let second = parse_list(second);
-            first.cmp(&second).is_lt().then_some(idx + 1)
+            (first < second).then_some(idx + 1)
         })
         .sum()
 }
