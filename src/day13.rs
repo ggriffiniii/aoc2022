@@ -12,13 +12,11 @@ impl Ord for ListOrInt {
         match (self, other) {
             (ListOrInt::Int(left), ListOrInt::Int(right)) => left.cmp(right),
             (ListOrInt::List(left), ListOrInt::List(right)) => left.cmp(right),
-            (ListOrInt::Int(left), ListOrInt::List(right)) => {
-                let left = [ListOrInt::Int(*left)];
-                left.as_slice().cmp(right.as_slice())
+            (left @ ListOrInt::Int(_), ListOrInt::List(right)) => {
+                std::slice::from_ref(left).cmp(right.as_slice())
             }
-            (ListOrInt::List(left), ListOrInt::Int(right)) => {
-                let right = [ListOrInt::Int(*right)];
-                left.as_slice().cmp(right.as_slice())
+            (ListOrInt::List(left), right @ ListOrInt::Int(_)) => {
+                left.as_slice().cmp(std::slice::from_ref(right))
             }
         }
     }
