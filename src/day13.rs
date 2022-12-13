@@ -81,6 +81,12 @@ pub fn part1(input: &str) -> usize {
         .sum()
 }
 
+macro_rules! packet {
+    ([$($x:tt),+]) => { vec![$(packet!(inner $x)),+] };
+    (inner [$($x:tt),+]) => { ListOrInt::List(vec![$(packet!(inner $x)),+]) };
+    (inner $x:literal) => { (ListOrInt::Int($x)) };
+}
+
 #[aoc(day13, part2)]
 pub fn part2(input: &str) -> usize {
     let mut packets: Vec<_> = input
@@ -88,11 +94,7 @@ pub fn part2(input: &str) -> usize {
         .filter(|line| !line.is_empty())
         .map(parse_list)
         .collect();
-    let divider1 = vec![ListOrInt::List(vec![ListOrInt::Int(2)])];
-    let divider2 = vec![ListOrInt::List(vec![ListOrInt::Int(6)])];
-    packets.push(divider1.clone());
-    packets.push(divider2.clone());
     packets.sort();
-    (packets.binary_search(&divider1).unwrap() + 1)
-        * (packets.binary_search(&divider2).unwrap() + 1)
+    (packets.binary_search(&packet!([[2]])).unwrap_err() + 1)
+        * (packets.binary_search(&packet!([[6]])).unwrap_err() + 2)
 }
