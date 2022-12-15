@@ -26,6 +26,28 @@ impl Sensor {
         required_mdist <= self.mdist()
     }
 }
+
+impl FromStr for Sensor {
+    type Err = Infallible;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        let input = input.strip_prefix("Sensor at x=").unwrap();
+        let (sensor_x, rem) = input.split_once(", y=").unwrap();
+        let (sensor_y, rem) = rem.split_once(": closest beacon is at x=").unwrap();
+        let (beacon_x, beacon_y) = rem.split_once(", y=").unwrap();
+        Ok(Sensor {
+            sensor: XY {
+                x: sensor_x.parse().unwrap(),
+                y: sensor_y.parse().unwrap(),
+            },
+            beacon: XY {
+                x: beacon_x.parse().unwrap(),
+                y: beacon_y.parse().unwrap(),
+            },
+        })
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct Region {
     top_left: XY,
@@ -57,99 +79,132 @@ impl Region {
         ]
         .into_iter()
     }
-    fn split_vertical(&self) -> Option<(Region, Region)> {
-        if self.top_left.y == self.bottom_right.y {
-            return None;
-        }
-        let mid_y = (self.top_left.y + self.bottom_right.y) / 2;
-        Some((
-            Region {
-                top_left: self.top_left,
-                bottom_right: XY {
-                    x: self.bottom_right.x,
-                    y: mid_y,
-                },
-            },
-            Region {
-                top_left: XY {
-                    x: self.top_left.x,
-                    y: mid_y + 1,
-                },
-                bottom_right: self.bottom_right,
-            },
-        ))
-    }
-    fn split_horizontal(&self) -> Option<(Region, Region)> {
-        if self.top_left.x == self.bottom_right.x {
-            return None;
-        }
-        let mid_x = (self.top_left.x + self.bottom_right.x) / 2;
-        Some((
-            Region {
-                top_left: self.top_left,
-                bottom_right: XY {
-                    x: mid_x,
-                    y: self.bottom_right.y,
-                },
-            },
-            Region {
-                top_left: XY {
-                    x: mid_x + 1,
-                    y: self.top_left.y,
-                },
-                bottom_right: self.bottom_right,
-            },
-        ))
-    }
 
-    fn quadrants(&self) -> Option<impl Iterator<Item = Region>> {
-        let mut quads = vec![];
-        match self.split_vertical() {
-            Some((upper, lower)) => match upper.split_horizontal() {
-                Some((upper_left, upper_right)) => {
-                    quads.push(upper_left);
-                    quads.push(upper_right);
-                    let (lower_left, lower_right) = lower.split_horizontal().unwrap();
-                    quads.push(lower_left);
-                    quads.push(lower_right);
-                    Some(quads.into_iter())
-                }
-                None => {
-                    quads.push(upper);
-                    quads.push(lower);
-                    Some(quads.into_iter())
-                }
-            },
-            None => match self.split_horizontal() {
-                Some((left, right)) => {
-                    quads.push(left);
-                    quads.push(right);
-                    Some(quads.into_iter())
-                }
-                None => None,
-            },
+    fn quadrants(&self) -> impl Iterator<Item = Region> {
+        #[derive(Debug, Copy, Clone)]
+        enum Split {
+            None,
+            Horizontal,
+            Vertical,
+            Both,
         }
-    }
-}
-
-impl FromStr for Sensor {
-    type Err = Infallible;
-
-    fn from_str(input: &str) -> Result<Self, Self::Err> {
-        let input = input.strip_prefix("Sensor at x=").unwrap();
-        let (sensor_x, rem) = input.split_once(", y=").unwrap();
-        let (sensor_y, rem) = rem.split_once(": closest beacon is at x=").unwrap();
-        let (beacon_x, beacon_y) = rem.split_once(", y=").unwrap();
-        Ok(Sensor {
-            sensor: XY {
-                x: sensor_x.parse().unwrap(),
-                y: sensor_y.parse().unwrap(),
-            },
-            beacon: XY {
-                x: beacon_x.parse().unwrap(),
-                y: beacon_y.parse().unwrap(),
-            },
-        })
+        struct QuadIter {
+            idx: usize,
+            region: Region,
+            split: Split,
+            mid: XY,
+        }
+        impl Iterator for QuadIter {
+            type Item = Region;
+            fn next(&mut self) -> Option<Self::Item> {
+                let r = match self.split {
+                    Split::None => return None,
+                    Split::Horizontal => {
+                        if self.idx == 0 {
+                            Some(Region {
+                                top_left: self.region.top_left,
+                                bottom_right: self.mid,
+                            })
+                        } else {
+                            self.split = Split::None;
+                            Some(Region {
+                                top_left: XY {
+                                    x: self.mid.x + 1,
+                                    y: self.region.top_left.y,
+                                },
+                                bottom_right: self.region.bottom_right,
+                            })
+                        }
+                    }
+                    Split::Vertical => {
+                        if self.idx == 0 {
+                            Some(Region {
+                                top_left: self.region.top_left,
+                                bottom_right: self.mid,
+                            })
+                        } else {
+                            self.split = Split::None;
+                            Some(Region {
+                                top_left: XY {
+                                    x: self.region.top_left.x,
+                                    y: self.mid.y + 1,
+                                },
+                                bottom_right: self.region.bottom_right,
+                            })
+                        }
+                    }
+                    Split::Both => {
+                        if self.idx == 0 {
+                            Some(Region {
+                                top_left: self.region.top_left,
+                                bottom_right: self.mid,
+                            })
+                        } else if self.idx == 1 {
+                            Some(Region {
+                                top_left: XY {
+                                    x: self.mid.x + 1,
+                                    y: self.region.top_left.y,
+                                },
+                                bottom_right: XY {
+                                    x: self.region.bottom_right.x,
+                                    y: self.mid.y,
+                                },
+                            })
+                        } else if self.idx == 2 {
+                            Some(Region {
+                                top_left: XY {
+                                    x: self.region.top_left.x,
+                                    y: self.mid.y + 1,
+                                },
+                                bottom_right: XY {
+                                    x: self.mid.x,
+                                    y: self.region.bottom_right.y,
+                                },
+                            })
+                        } else {
+                            self.split = Split::None;
+                            Some(Region {
+                                top_left: XY {
+                                    x: self.mid.x + 1,
+                                    y: self.mid.y + 1,
+                                },
+                                bottom_right: self.region.bottom_right,
+                            })
+                        }
+                    }
+                };
+                self.idx += 1;
+                r
+            }
+        }
+        let mid = XY {
+            x: self.top_left.x.abs_diff(self.bottom_right.x) as isize / 2 + self.top_left.x,
+            y: self.top_left.y.abs_diff(self.bottom_right.y) as isize / 2 + self.top_left.y,
+        };
+        let split = match (mid.x == self.bottom_right.x, mid.y == self.bottom_right.y) {
+            (true, true) => {
+                // region is a single square.
+                Split::None
+            }
+            (true, false) => {
+                // region is one square wide, multiple squares tall.
+                Split::Vertical
+            }
+            (false, true) => {
+                // region is multiple squares wide, one square tall.
+                Split::Horizontal
+            }
+            (false, false) => {
+                // region is multiple squares wide, multiple squares tall.
+                Split::Both
+            }
+        };
+        QuadIter {
+            idx: 0,
+            region: self.clone(),
+            split,
+            mid,
+        }
     }
 }
 
@@ -158,8 +213,8 @@ pub fn part1(input: &str) -> usize {
     const TARGET_ROW: isize = 2_000_000;
     let mut target_row_cols = Vec::new();
     for Sensor { sensor, beacon } in input.lines().map(|line| line.parse::<Sensor>().unwrap()) {
-        let dist = (sensor.x - beacon.x).abs() as usize + (sensor.y - beacon.y).abs() as usize;
-        let y_offset = (TARGET_ROW - sensor.y).abs() as usize;
+        let dist = sensor.x.abs_diff(beacon.x) + sensor.y.abs_diff(beacon.y);
+        let y_offset = TARGET_ROW.abs_diff(sensor.y);
         if y_offset < dist {
             let x_cols =
                 sensor.x - (dist - y_offset) as isize..sensor.x + (dist - y_offset) as isize + 1;
@@ -185,7 +240,7 @@ pub fn part1(input: &str) -> usize {
     num_cols
 }
 
-fn divide_and_conquer(sensors: &[Sensor], region: Region, depth: usize) -> Option<XY> {
+fn divide_and_conquer(sensors: &[Sensor], region: Region) -> Option<XY> {
     if sensors
         .iter()
         .any(|sensor| sensor.covers_entire_region(region.clone()))
@@ -195,8 +250,8 @@ fn divide_and_conquer(sensors: &[Sensor], region: Region, depth: usize) -> Optio
     if region.area() == 1 {
         return Some(region.top_left);
     }
-    for quadrant in region.quadrants()? {
-        if let Some(xy) = divide_and_conquer(sensors, quadrant, depth + 1) {
+    for quadrant in region.quadrants() {
+        if let Some(xy) = divide_and_conquer(sensors, quadrant) {
             return Some(xy);
         }
     }
@@ -219,8 +274,28 @@ pub fn part2(input: &str) -> isize {
             top_left: XY { x: 0, y: 0 },
             bottom_right: bounds,
         },
-        0,
     )
     .unwrap();
     x * 4_000_000 + y
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+      #[test]
+      fn test_quadrants(x in -100isize..100, y in -100isize..100, width in 2isize..100, height in 2isize..100) {
+        let region = Region{
+          top_left: XY{x, y},
+          bottom_right: XY{x: x+width as isize-1, y: y+height as isize-1},
+        };
+        let area = region.area();
+        let quadrants: Vec<_> = region.quadrants().collect();
+        dbg!(&region, &quadrants);
+        assert_eq!(quadrants.iter().map(|r| r.area()).sum::<usize>(), area);
+        assert!(quadrants.len() == 2 || quadrants.len() == 4);
+      }
+    }
 }
