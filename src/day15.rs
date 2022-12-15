@@ -1,4 +1,4 @@
-use std::{collections::HashSet, convert::Infallible, str::FromStr};
+use std::{convert::Infallible, str::FromStr};
 
 use aoc_runner_derive::aoc;
 
@@ -63,12 +63,18 @@ impl Region {
         }
         let mid_y = (self.top_left.y + self.bottom_right.y) / 2;
         Some((
-            Region{
+            Region {
                 top_left: self.top_left,
-                bottom_right: XY{x: self.bottom_right.x, y: mid_y},
+                bottom_right: XY {
+                    x: self.bottom_right.x,
+                    y: mid_y,
+                },
             },
-            Region{
-                top_left: XY{x: self.top_left.x, y: mid_y+1},
+            Region {
+                top_left: XY {
+                    x: self.top_left.x,
+                    y: mid_y + 1,
+                },
                 bottom_right: self.bottom_right,
             },
         ))
@@ -79,12 +85,18 @@ impl Region {
         }
         let mid_x = (self.top_left.x + self.bottom_right.x) / 2;
         Some((
-            Region{
+            Region {
                 top_left: self.top_left,
-                bottom_right: XY{x: mid_x, y: self.bottom_right.y},
+                bottom_right: XY {
+                    x: mid_x,
+                    y: self.bottom_right.y,
+                },
             },
-            Region{
-                top_left: XY{x: mid_x+1, y: self.top_left.y},
+            Region {
+                top_left: XY {
+                    x: mid_x + 1,
+                    y: self.top_left.y,
+                },
                 bottom_right: self.bottom_right,
             },
         ))
@@ -93,34 +105,28 @@ impl Region {
     fn quadrants(&self) -> Option<impl Iterator<Item = Region>> {
         let mut quads = vec![];
         match self.split_vertical() {
-            Some((upper, lower)) => {
-                match upper.split_horizontal() {
-                    Some((upper_left, upper_right)) => {
-                        quads.push(upper_left);
-                        quads.push(upper_right);
-                        let (lower_left, lower_right) = lower.split_horizontal().unwrap();
-                        quads.push(lower_left);
-                        quads.push(lower_right);
-                        Some(quads.into_iter())
-                    },
-                    None => {
-                        quads.push(upper);
-                        quads.push(lower);
-                        Some(quads.into_iter())
-                    }
+            Some((upper, lower)) => match upper.split_horizontal() {
+                Some((upper_left, upper_right)) => {
+                    quads.push(upper_left);
+                    quads.push(upper_right);
+                    let (lower_left, lower_right) = lower.split_horizontal().unwrap();
+                    quads.push(lower_left);
+                    quads.push(lower_right);
+                    Some(quads.into_iter())
+                }
+                None => {
+                    quads.push(upper);
+                    quads.push(lower);
+                    Some(quads.into_iter())
                 }
             },
-            None => {
-                match self.split_horizontal() {
-                    Some((left, right)) => {
-                        quads.push(left);
-                        quads.push(right);
-                        Some(quads.into_iter())
-                    },
-                    None => {
-                        None
-                    }
+            None => match self.split_horizontal() {
+                Some((left, right)) => {
+                    quads.push(left);
+                    quads.push(right);
+                    Some(quads.into_iter())
                 }
+                None => None,
             },
         }
     }
@@ -149,25 +155,34 @@ impl FromStr for Sensor {
 
 #[aoc(day15, part1)]
 pub fn part1(input: &str) -> usize {
-    let target_row = 2_000_000;
-    let mut not_beacon = HashSet::new();
-    let mut beacons_in_target_row = Vec::new();
+    const TARGET_ROW: isize = 2_000_000;
+    let mut target_row_cols = Vec::new();
     for Sensor { sensor, beacon } in input.lines().map(|line| line.parse::<Sensor>().unwrap()) {
-        if beacon.y == target_row {
-            beacons_in_target_row.push(beacon.x);
-        }
         let dist = (sensor.x - beacon.x).abs() as usize + (sensor.y - beacon.y).abs() as usize;
-        let y_offset = (target_row - sensor.y).abs() as usize;
+        let y_offset = (TARGET_ROW - sensor.y).abs() as usize;
         if y_offset < dist {
-            for x in sensor.x - (dist - y_offset) as isize..=sensor.x + (dist - y_offset) as isize {
-                not_beacon.insert(x);
+            let x_cols =
+                sensor.x - (dist - y_offset) as isize..sensor.x + (dist - y_offset) as isize + 1;
+            if beacon.y == TARGET_ROW {
+                target_row_cols.push(x_cols.start..beacon.y);
+                target_row_cols.push(beacon.y + 1..x_cols.end);
+            } else {
+                target_row_cols.push(x_cols);
             }
         }
     }
-    for beacon in beacons_in_target_row {
-        not_beacon.remove(&beacon);
+    target_row_cols.sort_by(|a, b| a.start.cmp(&b.start).then(a.end.cmp(&b.end)));
+    let mut num_cols = 0;
+    let mut row_cols_iter = target_row_cols.into_iter();
+    let first = row_cols_iter.next().unwrap();
+    num_cols += first.len();
+    let mut prev_end = first.end;
+    for col_range in row_cols_iter {
+        let std::ops::Range { start, end } = col_range;
+        num_cols += (start.max(prev_end)..end.max(prev_end)).len();
+        prev_end = end.max(prev_end);
     }
-    not_beacon.len()
+    num_cols
 }
 
 fn divide_and_conquer(sensors: &[Sensor], region: Region, depth: usize) -> Option<XY> {
@@ -190,12 +205,15 @@ fn divide_and_conquer(sensors: &[Sensor], region: Region, depth: usize) -> Optio
 
 #[aoc(day15, part2)]
 pub fn part2(input: &str) -> isize {
-    let bounds = XY{x: 4_000_000, y: 4_000_000};
+    let bounds = XY {
+        x: 4_000_000,
+        y: 4_000_000,
+    };
     let sensors: Vec<Sensor> = input
         .lines()
         .map(|line| line.parse::<Sensor>().unwrap())
         .collect();
-    let XY{x, y} = divide_and_conquer(
+    let XY { x, y } = divide_and_conquer(
         &sensors,
         Region {
             top_left: XY { x: 0, y: 0 },
