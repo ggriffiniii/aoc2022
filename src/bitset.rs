@@ -166,6 +166,26 @@ impl SparseBitSet {
             },
         }
     }
+
+    pub fn space_used(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + match &self.0 {
+                State::Init => 0,
+                State::OneLevel {
+                    start_idx: _,
+                    chunks,
+                } => chunks.space_used(),
+                State::TwoLevel {
+                    start_idx: _,
+                    tables,
+                } => tables.space_used(),
+                State::ThreeLevel {
+                    start_idx: _,
+                    tables,
+                } => tables.space_used(),
+                State::FourLevel { tables } => tables.space_used(),
+            }
+    }
 }
 
 #[derive(Debug)]
@@ -236,6 +256,9 @@ impl Walker for Chunks {
     fn iter(&self) -> Self::Iter<'_> {
         self.iter()
     }
+    fn space_used(&self) -> usize {
+        std::mem::size_of::<Self>()
+    }
 }
 
 #[derive(Debug)]
@@ -284,6 +307,7 @@ trait Walker {
     fn walk(&self, bit_idx: u32) -> Option<&u64>;
     fn walk_or_create(&mut self, bit_idx: u32) -> &mut u64;
     fn iter(&self) -> Self::Iter<'_>;
+    fn space_used(&self) -> usize;
 }
 
 #[derive(Debug)]
@@ -328,6 +352,15 @@ where
             child_offset,
             child_iter: child.iter(),
         }
+    }
+    fn space_used(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + self
+                .0
+                .iter()
+                .filter_map(|child| child.as_ref())
+                .map(|child| child.space_used())
+                .sum::<usize>()
     }
 }
 
@@ -433,6 +466,50 @@ mod tests {
         assert!(bs.test_bit(1 << 24));
         bs.set_bit(u32::MAX);
         assert!(bs.test_bit(u32::MAX));
+    }
+
+    #[test]
+    fn test_space_used() {
+        const BASE_SIZE: usize = std::mem::size_of::<SparseBitSet>();
+        const TABLE_SIZE: usize = 256 * std::mem::size_of::<usize>();
+        const CHUNKS_SIZE: usize = 256 / 8;
+
+        let mut bs = SparseBitSet::new();
+        assert_eq!(BASE_SIZE, bs.space_used());
+        bs.set_bit(1);
+        assert_eq!(BASE_SIZE + CHUNKS_SIZE, bs.space_used());
+        bs.set_bit((1 << 8) - 1);
+        assert_eq!(BASE_SIZE + CHUNKS_SIZE, bs.space_used());
+        bs.set_bit(1 << 8);
+        assert_eq!(
+            BASE_SIZE + CHUNKS_SIZE + TABLE_SIZE + CHUNKS_SIZE,
+            bs.space_used()
+        );
+        bs.set_bit((1 << 16) - 1);
+        assert_eq!(
+            BASE_SIZE + CHUNKS_SIZE + TABLE_SIZE + CHUNKS_SIZE + CHUNKS_SIZE,
+            bs.space_used()
+        );
+        bs.set_bit(1 << 16);
+        assert_eq!(
+            BASE_SIZE + (4 * CHUNKS_SIZE) + (3 * TABLE_SIZE),
+            bs.space_used()
+        );
+        bs.set_bit((1 << 24) - 1);
+        assert_eq!(
+            BASE_SIZE + (5 * CHUNKS_SIZE) + (4 * TABLE_SIZE),
+            bs.space_used()
+        );
+        bs.set_bit(1 << 24);
+        assert_eq!(
+            BASE_SIZE + (6 * CHUNKS_SIZE) + (7 * TABLE_SIZE),
+            bs.space_used()
+        );
+        bs.set_bit(u32::MAX);
+        assert_eq!(
+            BASE_SIZE + (7 * CHUNKS_SIZE) + (9 * TABLE_SIZE),
+            bs.space_used()
+        );
     }
 
     proptest! {
