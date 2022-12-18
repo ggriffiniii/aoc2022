@@ -124,19 +124,19 @@ impl SparseBitSet {
             State::OneLevel { chunks, .. } => chunks
                 .walk(bit_idx)
                 .map(|chunk| chunk & (1 << (bit_idx % 64)) != 0)
-                .unwrap(),
+                .unwrap_or(false),
             State::TwoLevel { tables, .. } => tables
                 .walk(bit_idx)
                 .map(|chunk| chunk & (1 << (bit_idx % 64)) != 0)
-                .unwrap(),
+                .unwrap_or(false),
             State::ThreeLevel { tables, .. } => tables
                 .walk(bit_idx)
                 .map(|chunk| chunk & (1 << (bit_idx % 64)) != 0)
-                .unwrap(),
+                .unwrap_or(false),
             State::FourLevel { tables, .. } => tables
                 .walk(bit_idx)
                 .map(|chunk| chunk & (1 << (bit_idx % 64)) != 0)
-                .unwrap(),
+                .unwrap_or(false),
         }
     }
 
@@ -195,9 +195,7 @@ impl<'a> Iterator for SparseBitSetIter<'a> {
             SparseBitSetIter::ThreeLevel { start_idx, iter } => {
                 iter.next().map(|idx| idx | *start_idx)
             }
-            SparseBitSetIter::FourLevel { iter } => {
-                iter.next()
-            }
+            SparseBitSetIter::FourLevel { iter } => iter.next(),
         }
     }
 }
@@ -397,7 +395,7 @@ mod tests {
     #[test]
     fn test_sparse_bit_set_iter() {
         let mut bs = SparseBitSet::new();
-        let mut bits = vec![1 << 8, u32::MAX, 1 << 0, 1<<16];
+        let mut bits = vec![1 << 8, u32::MAX, 1 << 0, 1 << 16];
         for bit in bits.iter().copied() {
             bs.set_bit(bit);
         }

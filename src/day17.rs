@@ -1,3 +1,4 @@
+#![allow(clippy::redundant_field_names)]
 use std::collections::{HashMap, HashSet};
 
 use aoc_runner_derive::aoc;
