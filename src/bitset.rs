@@ -68,8 +68,14 @@ impl SparseBitSet {
             } => {
                 // expand
                 let mut tables = Box::new(Table::new());
-                tables.0[(start_idx as usize >> 8) & 0xff] = Some(l2_table);
-                Self::expand_if_necessary(State::ThreeLevel { start_idx, tables }, bit_idx)
+                tables.0[(start_idx as usize >> 16) & 0xff] = Some(l2_table);
+                Self::expand_if_necessary(
+                    State::ThreeLevel {
+                        start_idx: start_idx & L3_MASK,
+                        tables,
+                    },
+                    bit_idx,
+                )
             }
             State::ThreeLevel { start_idx, tables } if bit_idx & L3_MASK == start_idx => {
                 // no expansion necessary
@@ -81,7 +87,7 @@ impl SparseBitSet {
             } => {
                 // expand
                 let mut tables = Box::new(Table::new());
-                tables.0[(start_idx as usize >> 8) & 0xff] = Some(l3_table);
+                tables.0[(start_idx as usize >> 24) & 0xff] = Some(l3_table);
                 State::FourLevel { tables }
             }
             State::FourLevel { tables } => {
@@ -361,6 +367,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn test_iter_bits() {
@@ -426,5 +433,21 @@ mod tests {
         assert!(bs.test_bit(1 << 24));
         bs.set_bit(u32::MAX);
         assert!(bs.test_bit(u32::MAX));
+    }
+
+    proptest! {
+      #[test]
+      fn test_properties(mut values: Vec<u32>) {
+        let mut bs = SparseBitSet::new();
+        for v in values.iter().copied() {
+            bs.set_bit(v);
+        }
+        values.sort();
+
+        assert_eq!(&values, &bs.iter().collect::<Vec<_>>());
+        for v in values.iter().copied() {
+            assert!(bs.test_bit(v));
+        }
+      }
     }
 }
