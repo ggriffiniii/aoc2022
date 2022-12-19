@@ -24,7 +24,10 @@ const L1_MASK: u32 = 0xffff_ff00;
 const L2_MASK: u32 = 0xffff_0000;
 const L3_MASK: u32 = 0xff00_0000;
 #[derive(Debug)]
-pub struct SparseBitSet(State);
+pub struct SparseBitSet {
+    state: State,
+    len: u32, // number of bits set
+}
 impl Default for SparseBitSet {
     fn default() -> Self {
         SparseBitSet::new()
@@ -32,7 +35,10 @@ impl Default for SparseBitSet {
 }
 impl SparseBitSet {
     pub fn new() -> Self {
-        SparseBitSet(State::Init)
+        SparseBitSet {
+            state: State::Init,
+            len: 0,
+        }
     }
 
     fn expand_if_necessary(state: State, bit_idx: u32) -> State {
@@ -97,32 +103,74 @@ impl SparseBitSet {
         }
     }
 
-    pub fn set_bit(&mut self, bit_idx: u32) {
-        let state = std::mem::replace(&mut self.0, State::Init);
-        self.0 = Self::expand_if_necessary(state, bit_idx);
-        match &mut self.0 {
+    pub fn set_bit(&mut self, bit_idx: u32) -> bool {
+        let state = std::mem::replace(&mut self.state, State::Init);
+        self.state = Self::expand_if_necessary(state, bit_idx);
+        let inserted = match &mut self.state {
             State::Init => panic!("expand_if_necessary should have prevented this"),
             State::OneLevel { chunks, .. } => {
                 let chunk = chunks.walk_or_create(bit_idx);
+                let prev = *chunk;
                 *chunk |= 1 << (bit_idx % 64);
+                prev ^ *chunk != 0
             }
             State::TwoLevel { tables, .. } => {
                 let chunk = tables.walk_or_create(bit_idx);
+                let prev = *chunk;
                 *chunk |= 1 << (bit_idx % 64);
+                prev ^ *chunk != 0
             }
             State::ThreeLevel { tables, .. } => {
                 let chunk = tables.walk_or_create(bit_idx);
+                let prev = *chunk;
                 *chunk |= 1 << (bit_idx % 64);
+                prev ^ *chunk != 0
             }
             State::FourLevel { tables, .. } => {
                 let chunk = tables.walk_or_create(bit_idx);
+                let prev = *chunk;
                 *chunk |= 1 << (bit_idx % 64);
+                prev ^ *chunk != 0
             }
-        }
+        };
+        self.len += inserted as u32;
+        inserted
+    }
+
+    pub fn clear_bit(&mut self, bit_idx: u32) -> bool {
+        let removed = match &mut self.state {
+            State::Init => false,
+            State::OneLevel { chunks, .. } => {
+                let chunk = chunks.walk_or_create(bit_idx);
+                let prev = *chunk;
+                *chunk &= !(1 << (bit_idx % 64));
+                prev ^ *chunk != 0
+            }
+            State::TwoLevel { tables, .. } => {
+                let chunk = tables.walk_or_create(bit_idx);
+                let prev = *chunk;
+                *chunk &= !(1 << (bit_idx % 64));
+                prev ^ *chunk != 0
+            }
+            State::ThreeLevel { tables, .. } => {
+                let chunk = tables.walk_or_create(bit_idx);
+                let prev = *chunk;
+                *chunk &= !(1 << (bit_idx % 64));
+                prev ^ *chunk != 0
+            }
+            State::FourLevel { tables, .. } => {
+                let chunk = tables.walk_or_create(bit_idx);
+                let prev = *chunk;
+                *chunk &= !(1 << (bit_idx % 64));
+                prev ^ *chunk != 0
+            }
+        };
+        self.len -= removed as u32;
+        removed
     }
 
     pub fn test_bit(&self, bit_idx: u32) -> bool {
-        match &self.0 {
+        match &self.state {
             State::Init => false,
             State::OneLevel { start_idx, .. } if bit_idx & L1_MASK != *start_idx => false,
             State::TwoLevel { start_idx, .. } if bit_idx & L2_MASK != *start_idx => false,
@@ -146,30 +194,34 @@ impl SparseBitSet {
         }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = u32> + '_ {
-        match &self.0 {
-            State::Init => SparseBitSetIter::Init,
-            State::OneLevel { start_idx, chunks } => SparseBitSetIter::OneLevel {
+    pub fn iter(&self) -> SparseBitSetIter {
+        SparseBitSetIter(match &self.state {
+            State::Init => SparseBitSetIterState::Init,
+            State::OneLevel { start_idx, chunks } => SparseBitSetIterState::OneLevel {
                 start_idx: *start_idx,
                 iter: chunks.iter(),
             },
-            State::TwoLevel { start_idx, tables } => SparseBitSetIter::TwoLevel {
+            State::TwoLevel { start_idx, tables } => SparseBitSetIterState::TwoLevel {
                 start_idx: *start_idx,
                 iter: tables.iter(),
             },
-            State::ThreeLevel { start_idx, tables } => SparseBitSetIter::ThreeLevel {
+            State::ThreeLevel { start_idx, tables } => SparseBitSetIterState::ThreeLevel {
                 start_idx: *start_idx,
                 iter: tables.iter(),
             },
-            State::FourLevel { tables } => SparseBitSetIter::FourLevel {
+            State::FourLevel { tables } => SparseBitSetIterState::FourLevel {
                 iter: tables.iter(),
             },
-        }
+        })
+    }
+
+    pub fn len(&self) -> u32 {
+        self.len
     }
 
     pub fn space_used(&self) -> usize {
         std::mem::size_of::<Self>()
-            + match &self.0 {
+            + match &self.state {
                 State::Init => 0,
                 State::OneLevel {
                     start_idx: _,
@@ -189,7 +241,28 @@ impl SparseBitSet {
 }
 
 #[derive(Debug)]
-enum SparseBitSetIter<'a> {
+pub struct SparseBitSetIter<'a>(SparseBitSetIterState<'a>);
+impl<'a> Iterator for SparseBitSetIter<'a> {
+    type Item = u32;
+    fn next(&mut self) -> Option<u32> {
+        match &mut self.0 {
+            SparseBitSetIterState::Init => None,
+            SparseBitSetIterState::OneLevel { start_idx, iter } => {
+                iter.next().map(|idx| idx | *start_idx)
+            }
+            SparseBitSetIterState::TwoLevel { start_idx, iter } => {
+                iter.next().map(|idx| idx | *start_idx)
+            }
+            SparseBitSetIterState::ThreeLevel { start_idx, iter } => {
+                iter.next().map(|idx| idx | *start_idx)
+            }
+            SparseBitSetIterState::FourLevel { iter } => iter.next(),
+        }
+    }
+}
+
+#[derive(Debug)]
+enum SparseBitSetIterState<'a> {
     Init,
     OneLevel {
         start_idx: u32,
@@ -206,24 +279,6 @@ enum SparseBitSetIter<'a> {
     FourLevel {
         iter: <Table<4, Table<3, Table<2, Chunks>>> as Walker>::Iter<'a>,
     },
-}
-impl<'a> Iterator for SparseBitSetIter<'a> {
-    type Item = u32;
-    fn next(&mut self) -> Option<u32> {
-        match self {
-            SparseBitSetIter::Init => None,
-            SparseBitSetIter::OneLevel { start_idx, iter } => {
-                iter.next().map(|idx| idx | *start_idx)
-            }
-            SparseBitSetIter::TwoLevel { start_idx, iter } => {
-                iter.next().map(|idx| idx | *start_idx)
-            }
-            SparseBitSetIter::ThreeLevel { start_idx, iter } => {
-                iter.next().map(|idx| idx | *start_idx)
-            }
-            SparseBitSetIter::FourLevel { iter } => iter.next(),
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -517,13 +572,24 @@ mod tests {
       fn test_properties(mut values: Vec<u32>) {
         let mut bs = SparseBitSet::new();
         for v in values.iter().copied() {
-            bs.set_bit(v);
+            assert!(bs.set_bit(v));
         }
         values.sort();
+        values.dedup();
 
+        assert_eq!(values.len() as u32, bs.len());
         assert_eq!(&values, &bs.iter().collect::<Vec<_>>());
         for v in values.iter().copied() {
             assert!(bs.test_bit(v));
+        }
+
+        for v in values.iter().copied() {
+            assert!(bs.clear_bit(v));
+        }
+        assert_eq!(0, bs.len());
+        assert_eq!(Vec::<u32>::new(), bs.iter().collect::<Vec<_>>());
+        for v in values.iter().copied() {
+            assert!(!bs.test_bit(v));
         }
       }
     }
