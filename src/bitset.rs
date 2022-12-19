@@ -12,14 +12,17 @@ const fn min(a: usize, b: usize) -> usize {
     }
 }
 
-const L1_BIT_WIDTH: usize = (L1_TABLE_BYTES * std::mem::size_of::<u64>()).trailing_zeros() as usize;
+const BYTES_PER_USIZE: usize = std::mem::size_of::<usize>();
+const BITS_PER_USIZE: usize = BYTES_PER_USIZE * 8;
+
+const L1_BIT_WIDTH: usize = (L1_TABLE_BYTES * BYTES_PER_USIZE).trailing_zeros() as usize;
 const L2_BIT_WIDTH: usize = min(
     32 - L1_BIT_WIDTH,
-    (L2_MAX_TABLE_BYTES / std::mem::size_of::<usize>()).trailing_zeros() as usize,
+    (L2_MAX_TABLE_BYTES / BYTES_PER_USIZE).trailing_zeros() as usize,
 );
 const L3_BIT_WIDTH: usize = min(
     32 - L1_BIT_WIDTH - L2_BIT_WIDTH,
-    (L3_MAX_TABLE_BYTES / std::mem::size_of::<usize>()).trailing_zeros() as usize,
+    (L3_MAX_TABLE_BYTES / BYTES_PER_USIZE).trailing_zeros() as usize,
 );
 const L4_BIT_WIDTH: usize = 32 - L1_BIT_WIDTH - L2_BIT_WIDTH - L3_BIT_WIDTH;
 
@@ -27,10 +30,10 @@ const fn width_to_entries(bit_width: usize) -> usize {
     ((bit_width > 0) as usize) << bit_width
 }
 
-type L1 = Chunks<{ (1 << L1_BIT_WIDTH) / 64 }>; // 15 bits
-type L2 = Table<{ width_to_entries(L2_BIT_WIDTH) }, L1>; // 9  bits
-type L3 = Table<{ width_to_entries(L3_BIT_WIDTH) }, L2>; // 8  bits
-type L4 = Table<{ width_to_entries(L4_BIT_WIDTH) }, L3>; // 0  bits - disabled.
+type L1 = Chunks<{ (1 << L1_BIT_WIDTH) / BITS_PER_USIZE }>;
+type L2 = Table<{ width_to_entries(L2_BIT_WIDTH) }, L1>;
+type L3 = Table<{ width_to_entries(L3_BIT_WIDTH) }, L2>;
+type L4 = Table<{ width_to_entries(L4_BIT_WIDTH) }, L3>;
 
 #[derive(Debug)]
 enum State {
@@ -135,25 +138,25 @@ impl SparseBitSet {
             State::OneLevel { chunks, .. } => {
                 let chunk = chunks.walk_or_create(bit_idx);
                 let prev = *chunk;
-                *chunk |= 1 << (bit_idx % 64);
+                *chunk |= 1 << (bit_idx % BITS_PER_USIZE as u32);
                 prev ^ *chunk != 0
             }
             State::TwoLevel { tables, .. } => {
                 let chunk = tables.walk_or_create(bit_idx);
                 let prev = *chunk;
-                *chunk |= 1 << (bit_idx % 64);
+                *chunk |= 1 << (bit_idx % BITS_PER_USIZE as u32);
                 prev ^ *chunk != 0
             }
             State::ThreeLevel { tables, .. } => {
                 let chunk = tables.walk_or_create(bit_idx);
                 let prev = *chunk;
-                *chunk |= 1 << (bit_idx % 64);
+                *chunk |= 1 << (bit_idx % BITS_PER_USIZE as u32);
                 prev ^ *chunk != 0
             }
             State::FourLevel { tables, .. } => {
                 let chunk = tables.walk_or_create(bit_idx);
                 let prev = *chunk;
-                *chunk |= 1 << (bit_idx % 64);
+                *chunk |= 1 << (bit_idx % BITS_PER_USIZE as u32);
                 prev ^ *chunk != 0
             }
         };
@@ -167,25 +170,25 @@ impl SparseBitSet {
             State::OneLevel { chunks, .. } => {
                 let chunk = chunks.walk_or_create(bit_idx);
                 let prev = *chunk;
-                *chunk &= !(1 << (bit_idx % 64));
+                *chunk &= !(1 << (bit_idx % BITS_PER_USIZE as u32));
                 prev ^ *chunk != 0
             }
             State::TwoLevel { tables, .. } => {
                 let chunk = tables.walk_or_create(bit_idx);
                 let prev = *chunk;
-                *chunk &= !(1 << (bit_idx % 64));
+                *chunk &= !(1 << (bit_idx % BITS_PER_USIZE as u32));
                 prev ^ *chunk != 0
             }
             State::ThreeLevel { tables, .. } => {
                 let chunk = tables.walk_or_create(bit_idx);
                 let prev = *chunk;
-                *chunk &= !(1 << (bit_idx % 64));
+                *chunk &= !(1 << (bit_idx % BITS_PER_USIZE as u32));
                 prev ^ *chunk != 0
             }
             State::FourLevel { tables, .. } => {
                 let chunk = tables.walk_or_create(bit_idx);
                 let prev = *chunk;
-                *chunk &= !(1 << (bit_idx % 64));
+                *chunk &= !(1 << (bit_idx % BITS_PER_USIZE as u32));
                 prev ^ *chunk != 0
             }
         };
@@ -213,19 +216,19 @@ impl SparseBitSet {
             }
             State::OneLevel { chunks, .. } => chunks
                 .walk(bit_idx)
-                .map(|chunk| chunk & (1 << (bit_idx % 64)) != 0)
+                .map(|chunk| chunk & (1 << (bit_idx % BITS_PER_USIZE as u32)) != 0)
                 .unwrap_or(false),
             State::TwoLevel { tables, .. } => tables
                 .walk(bit_idx)
-                .map(|chunk| chunk & (1 << (bit_idx % 64)) != 0)
+                .map(|chunk| chunk & (1 << (bit_idx % BITS_PER_USIZE as u32)) != 0)
                 .unwrap_or(false),
             State::ThreeLevel { tables, .. } => tables
                 .walk(bit_idx)
-                .map(|chunk| chunk & (1 << (bit_idx % 64)) != 0)
+                .map(|chunk| chunk & (1 << (bit_idx % BITS_PER_USIZE as u32)) != 0)
                 .unwrap_or(false),
             State::FourLevel { tables, .. } => tables
                 .walk(bit_idx)
-                .map(|chunk| chunk & (1 << (bit_idx % 64)) != 0)
+                .map(|chunk| chunk & (1 << (bit_idx % BITS_PER_USIZE as u32)) != 0)
                 .unwrap_or(false),
         }
     }
@@ -316,7 +319,7 @@ enum SparseBitSetIterState<'a> {
 }
 
 #[derive(Debug)]
-struct Chunks<const N: usize>([u64; N]);
+struct Chunks<const N: usize>([usize; N]);
 impl<const N: usize> Chunks<N> {
     fn iter(&self) -> ChunksIter {
         let mut chunk_iter = self.0.iter().copied().enumerate();
@@ -337,12 +340,12 @@ impl<const N: usize> Walker for Chunks<N> {
     fn new() -> Self {
         Chunks([0; N])
     }
-    fn walk(&self, bit_idx: u32) -> Option<&u64> {
-        let chunk_idx = (bit_idx & Self::MASK) / 64;
+    fn walk(&self, bit_idx: u32) -> Option<&usize> {
+        let chunk_idx = (bit_idx & Self::MASK) / BITS_PER_USIZE as u32;
         Some(&self.0[chunk_idx as usize])
     }
-    fn walk_or_create(&mut self, bit_idx: u32) -> &mut u64 {
-        let chunk_idx = (bit_idx & Self::MASK) / 64;
+    fn walk_or_create(&mut self, bit_idx: u32) -> &mut usize {
+        let chunk_idx = (bit_idx & Self::MASK) / BITS_PER_USIZE as u32;
         &mut self.0[chunk_idx as usize]
     }
     fn iter(&self) -> Self::Iter<'_> {
@@ -355,7 +358,7 @@ impl<const N: usize> Walker for Chunks<N> {
 
 #[derive(Debug)]
 struct ChunksIter<'a> {
-    chunk_iter: std::iter::Enumerate<std::iter::Copied<std::slice::Iter<'a, u64>>>,
+    chunk_iter: std::iter::Enumerate<std::iter::Copied<std::slice::Iter<'a, usize>>>,
     chunk_idx: u32,
     bit_iter: IterBits,
 }
@@ -364,7 +367,7 @@ impl<'a> Iterator for ChunksIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             match self.bit_iter.next() {
-                Some(bitpos) => return Some(bitpos + (64 * self.chunk_idx)),
+                Some(bitpos) => return Some(bitpos + (BITS_PER_USIZE as u32 * self.chunk_idx)),
                 None => {
                     let (chunk_idx, chunk) = self.chunk_iter.next()?;
                     self.chunk_idx = chunk_idx as u32;
@@ -375,7 +378,7 @@ impl<'a> Iterator for ChunksIter<'a> {
     }
 }
 #[derive(Debug)]
-struct IterBits(u64);
+struct IterBits(usize);
 impl Iterator for IterBits {
     type Item = u32;
     fn next(&mut self) -> Option<Self::Item> {
@@ -398,8 +401,8 @@ trait Walker {
         Self: 'a;
 
     fn new() -> Self;
-    fn walk(&self, bit_idx: u32) -> Option<&u64>;
-    fn walk_or_create(&mut self, bit_idx: u32) -> &mut u64;
+    fn walk(&self, bit_idx: u32) -> Option<&usize>;
+    fn walk_or_create(&mut self, bit_idx: u32) -> &mut usize;
     fn iter(&self) -> Self::Iter<'_>;
     fn space_used(&self) -> usize;
 }
@@ -451,14 +454,14 @@ where
             MaybeUninit::<[Option<Box<ChildTable>>; NUM_ENTRIES]>::zeroed().assume_init()
         })
     }
-    fn walk(&self, bit_idx: u32) -> Option<&u64> {
+    fn walk(&self, bit_idx: u32) -> Option<&usize> {
         let offset = (bit_idx & Self::MASK) >> Self::CHILD_MASK.trailing_ones();
         self.0[offset as usize]
             .as_ref()
             .and_then(|child_table| child_table.walk(bit_idx))
     }
 
-    fn walk_or_create(&mut self, bit_idx: u32) -> &mut u64 {
+    fn walk_or_create(&mut self, bit_idx: u32) -> &mut usize {
         //eprintln!("{:0x}", Self::MASK);
         let offset = (bit_idx & Self::MASK) >> Self::CHILD_MASK.trailing_ones();
         self.0[offset as usize]
@@ -567,7 +570,7 @@ mod tests {
         );
         assert_eq!(
             (0..64).collect::<Vec<_>>(),
-            IterBits(u64::MAX).collect::<Vec<_>>()
+            IterBits(u64::MAX as usize).collect::<Vec<_>>()
         );
     }
 
