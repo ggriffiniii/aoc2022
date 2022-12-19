@@ -1,28 +1,46 @@
 use std::{fmt::Debug, mem::MaybeUninit};
 
+const L1_TABLE_BYTES: usize = 4096;
+const L2_MAX_TABLE_BYTES: usize = 4096;
+const L3_MAX_TABLE_BYTES: usize = 4096;
+
+const fn min(a: usize, b: usize) -> usize {
+    if a < b {
+        a
+    } else {
+        b
+    }
+}
+
+const L1_BIT_WIDTH: usize = (L1_TABLE_BYTES * std::mem::size_of::<u64>()).trailing_zeros() as usize;
+const L2_BIT_WIDTH: usize = min(
+    32 - L1_BIT_WIDTH,
+    (L2_MAX_TABLE_BYTES / std::mem::size_of::<usize>()).trailing_zeros() as usize,
+);
+const L3_BIT_WIDTH: usize = min(
+    32 - L1_BIT_WIDTH - L2_BIT_WIDTH,
+    (L3_MAX_TABLE_BYTES / std::mem::size_of::<usize>()).trailing_zeros() as usize,
+);
+const L4_BIT_WIDTH: usize = 32 - L1_BIT_WIDTH - L2_BIT_WIDTH - L3_BIT_WIDTH;
+
+const fn width_to_entries(bit_width: usize) -> usize {
+    ((bit_width > 0) as usize) << bit_width
+}
+
+type L1 = Chunks<{ (1 << L1_BIT_WIDTH) / 64 }>; // 15 bits
+type L2 = Table<{ width_to_entries(L2_BIT_WIDTH) }, L1>; // 9  bits
+type L3 = Table<{ width_to_entries(L3_BIT_WIDTH) }, L2>; // 8  bits
+type L4 = Table<{ width_to_entries(L4_BIT_WIDTH) }, L3>; // 0  bits - disabled.
+
 #[derive(Debug)]
 enum State {
     Init,
-    OneLevel {
-        start_idx: u32,
-        chunks: Box<Chunks>,
-    },
-    TwoLevel {
-        start_idx: u32,
-        tables: Box<Table<256, Chunks>>,
-    },
-    ThreeLevel {
-        start_idx: u32,
-        tables: Box<Table<256, Table<256, Chunks>>>,
-    },
-    FourLevel {
-        tables: Box<Table<256, Table<256, Table<256, Chunks>>>>,
-    },
+    OneLevel { start_idx: u32, chunks: Box<L1> },
+    TwoLevel { start_idx: u32, tables: Box<L2> },
+    ThreeLevel { start_idx: u32, tables: Box<L3> },
+    FourLevel { tables: Box<L4> },
 }
 
-const L1_MASK: u32 = 0xffff_ff00;
-const L2_MASK: u32 = 0xffff_0000;
-const L3_MASK: u32 = 0xff00_0000;
 #[derive(Debug)]
 pub struct SparseBitSet {
     state: State,
@@ -44,27 +62,31 @@ impl SparseBitSet {
     fn expand_if_necessary(state: State, bit_idx: u32) -> State {
         match state {
             State::Init => {
-                let start_idx = bit_idx & L1_MASK;
-                let chunks = Box::new(Chunks([0; 4]));
+                let start_idx = bit_idx & !(L1::MASK | L1::CHILD_MASK);
+                let chunks = Box::new(Chunks::new());
                 State::OneLevel { start_idx, chunks }
             }
-            State::OneLevel { start_idx, chunks } if bit_idx & L1_MASK == start_idx => {
+            State::OneLevel { start_idx, chunks }
+                if bit_idx & !(L1::MASK | L1::CHILD_MASK) == start_idx =>
+            {
                 // no expansion necessary
                 State::OneLevel { start_idx, chunks }
             }
             State::OneLevel { start_idx, chunks } => {
                 // expand
                 let mut tables = Box::new(Table::new());
-                tables.0[(start_idx as usize >> 8) & 0xff] = Some(chunks);
+                tables.0[tables.offset_from_value(start_idx)] = Some(chunks);
                 Self::expand_if_necessary(
                     State::TwoLevel {
-                        start_idx: start_idx & L2_MASK,
+                        start_idx: start_idx & !(L2::MASK | L2::CHILD_MASK),
                         tables,
                     },
                     bit_idx,
                 )
             }
-            State::TwoLevel { start_idx, tables } if bit_idx & L2_MASK == start_idx => {
+            State::TwoLevel { start_idx, tables }
+                if bit_idx & !(L2::MASK | L2::CHILD_MASK) == start_idx =>
+            {
                 // no expansion necessary
                 State::TwoLevel { start_idx, tables }
             }
@@ -74,16 +96,18 @@ impl SparseBitSet {
             } => {
                 // expand
                 let mut tables = Box::new(Table::new());
-                tables.0[(start_idx as usize >> 16) & 0xff] = Some(l2_table);
+                tables.0[tables.offset_from_value(start_idx)] = Some(l2_table);
                 Self::expand_if_necessary(
                     State::ThreeLevel {
-                        start_idx: start_idx & L3_MASK,
+                        start_idx: start_idx & !(L3::MASK | L3::CHILD_MASK),
                         tables,
                     },
                     bit_idx,
                 )
             }
-            State::ThreeLevel { start_idx, tables } if bit_idx & L3_MASK == start_idx => {
+            State::ThreeLevel { start_idx, tables }
+                if bit_idx & !(L3::MASK | L3::CHILD_MASK) == start_idx =>
+            {
                 // no expansion necessary
                 State::ThreeLevel { start_idx, tables }
             }
@@ -93,7 +117,7 @@ impl SparseBitSet {
             } => {
                 // expand
                 let mut tables = Box::new(Table::new());
-                tables.0[(start_idx as usize >> 24) & 0xff] = Some(l3_table);
+                tables.0[tables.offset_from_value(start_idx)] = Some(l3_table);
                 State::FourLevel { tables }
             }
             State::FourLevel { tables } => {
@@ -172,9 +196,21 @@ impl SparseBitSet {
     pub fn test_bit(&self, bit_idx: u32) -> bool {
         match &self.state {
             State::Init => false,
-            State::OneLevel { start_idx, .. } if bit_idx & L1_MASK != *start_idx => false,
-            State::TwoLevel { start_idx, .. } if bit_idx & L2_MASK != *start_idx => false,
-            State::ThreeLevel { start_idx, .. } if bit_idx & L3_MASK != *start_idx => false,
+            State::OneLevel { start_idx, .. }
+                if bit_idx & !(L1::MASK | L1::CHILD_MASK) != *start_idx =>
+            {
+                false
+            }
+            State::TwoLevel { start_idx, .. }
+                if bit_idx & !(L2::MASK | L2::CHILD_MASK) != *start_idx =>
+            {
+                false
+            }
+            State::ThreeLevel { start_idx, .. }
+                if bit_idx & !(L3::MASK | L3::CHILD_MASK) != *start_idx =>
+            {
+                false
+            }
             State::OneLevel { chunks, .. } => chunks
                 .walk(bit_idx)
                 .map(|chunk| chunk & (1 << (bit_idx % 64)) != 0)
@@ -268,20 +304,20 @@ enum SparseBitSetIterState<'a> {
     },
     TwoLevel {
         start_idx: u32,
-        iter: <Table<256, Chunks> as Walker>::Iter<'a>,
+        iter: <L2 as Walker>::Iter<'a>,
     },
     ThreeLevel {
         start_idx: u32,
-        iter: <Table<256, Table<256, Chunks>> as Walker>::Iter<'a>,
+        iter: <L3 as Walker>::Iter<'a>,
     },
     FourLevel {
-        iter: <Table<256, Table<256, Table<256, Chunks>>> as Walker>::Iter<'a>,
+        iter: <L4 as Walker>::Iter<'a>,
     },
 }
 
 #[derive(Debug)]
-struct Chunks([u64; 4]);
-impl Chunks {
+struct Chunks<const N: usize>([u64; N]);
+impl<const N: usize> Chunks<N> {
     fn iter(&self) -> ChunksIter {
         let mut chunk_iter = self.0.iter().copied().enumerate();
         let (chunk_idx, chunk) = chunk_iter.next().unwrap();
@@ -293,19 +329,20 @@ impl Chunks {
         }
     }
 }
-impl Walker for Chunks {
+impl<const N: usize> Walker for Chunks<N> {
+    const CHILD_MASK: u32 = 0;
     const MASK: u32 = std::mem::size_of::<Self>() as u32 * 8 - 1;
 
     type Iter<'a> = ChunksIter<'a>;
     fn new() -> Self {
-        Chunks([0; 4])
+        Chunks([0; N])
     }
     fn walk(&self, bit_idx: u32) -> Option<&u64> {
-        let chunk_idx = (bit_idx & 0xff) / 64;
+        let chunk_idx = (bit_idx & Self::MASK) / 64;
         Some(&self.0[chunk_idx as usize])
     }
     fn walk_or_create(&mut self, bit_idx: u32) -> &mut u64 {
-        let chunk_idx = (bit_idx & 0xff) / 64;
+        let chunk_idx = (bit_idx & Self::MASK) / 64;
         &mut self.0[chunk_idx as usize]
     }
     fn iter(&self) -> Self::Iter<'_> {
@@ -354,6 +391,7 @@ impl Iterator for IterBits {
 }
 
 trait Walker {
+    const CHILD_MASK: u32;
     const MASK: u32;
     type Iter<'a>: Iterator<Item = u32>
     where
@@ -380,12 +418,30 @@ where
 {
     type ChildNode = ChildTable;
 }
+impl<const NUM_ENTRIES: usize, ChildTable> Table<NUM_ENTRIES, ChildTable>
+where
+    Self: Debug + Walker,
+    ChildTable: Debug + Walker,
+{
+    const fn mask(num_entries: usize, child_mask: u32) -> u32 {
+        if num_entries == 0 {
+            0
+        } else {
+            (num_entries as u32 - 1) << child_mask.trailing_ones()
+        }
+    }
+
+    const fn offset_from_value(&self, v: u32) -> usize {
+        ((v & Self::MASK) >> Self::CHILD_MASK.trailing_ones()) as usize
+    }
+}
 
 impl<const NUM_ENTRIES: usize, ChildTable> Walker for Table<NUM_ENTRIES, ChildTable>
 where
     ChildTable: Debug + Walker,
 {
-    const MASK: u32 = (NUM_ENTRIES as u32 - 1) << (32 - ChildTable::MASK.leading_zeros());
+    const CHILD_MASK: u32 = ChildTable::MASK | ChildTable::CHILD_MASK;
+    const MASK: u32 = Self::mask(NUM_ENTRIES, Self::CHILD_MASK);
     type Iter<'a> = TableIter<'a, NUM_ENTRIES, Self> where Self: 'a;
 
     fn new() -> Self {
@@ -396,7 +452,7 @@ where
         })
     }
     fn walk(&self, bit_idx: u32) -> Option<&u64> {
-        let offset = (bit_idx & Self::MASK) >> Self::MASK.trailing_zeros();
+        let offset = (bit_idx & Self::MASK) >> Self::CHILD_MASK.trailing_ones();
         self.0[offset as usize]
             .as_ref()
             .and_then(|child_table| child_table.walk(bit_idx))
@@ -404,7 +460,7 @@ where
 
     fn walk_or_create(&mut self, bit_idx: u32) -> &mut u64 {
         //eprintln!("{:0x}", Self::MASK);
-        let offset = (bit_idx & Self::MASK) >> Self::MASK.trailing_zeros();
+        let offset = (bit_idx & Self::MASK) >> Self::CHILD_MASK.trailing_ones();
         self.0[offset as usize]
             .get_or_insert_with(|| Box::new(ChildTable::new()))
             .walk_or_create(bit_idx)
@@ -414,7 +470,7 @@ where
         let mut table_iter = self.0.iter().enumerate();
         let (child_offset, child) = table_iter
             .find_map(|(child_offset, child)| {
-                let child_offset = (child_offset as u32) << Self::MASK.trailing_zeros();
+                let child_offset = (child_offset as u32) << Self::CHILD_MASK.trailing_ones();
                 Some((child_offset, child.as_ref()?))
             })
             .expect("unexpected table with no children");
@@ -444,15 +500,6 @@ where
     child_offset: u32,
     child_iter: <<Table as Node>::ChildNode as Walker>::Iter<'a>,
 }
-impl<'a, const NUM_ENTRIES: usize, Table> TableIter<'a, NUM_ENTRIES, Table>
-where
-    Table: Node + 'a,
-    Table::ChildNode: Walker + 'a,
-{
-    fn mask() -> u32 {
-        (NUM_ENTRIES as u32 - 1) << (32 - Table::ChildNode::MASK.leading_zeros())
-    }
-}
 impl<'a, const NUM_ENTRIES: usize, Table> Iterator for TableIter<'a, NUM_ENTRIES, Table>
 where
     Table: Debug + Node + 'a,
@@ -467,7 +514,7 @@ where
             loop {
                 match self.table_iter.next() {
                     Some((child_idx, Some(next_child))) => {
-                        self.child_offset = (child_idx as u32) << Self::mask().trailing_zeros();
+                        self.child_offset = (child_idx as u32) << Table::CHILD_MASK.trailing_ones();
                         self.child_iter = next_child.iter();
                         break;
                     }
@@ -487,6 +534,29 @@ mod tests {
     use proptest::prelude::*;
 
     #[test]
+    fn sanity() {
+        dbg!(L1_BIT_WIDTH);
+        dbg!(L2_BIT_WIDTH);
+        dbg!(L3_BIT_WIDTH);
+        dbg!(L4_BIT_WIDTH);
+        assert_eq!((L1::MASK | L2::MASK | L3::MASK | L4::MASK).count_zeros(), 0);
+
+        // no overlap.
+        assert_eq!((L1::MASK & L2::MASK), 0);
+        assert_eq!((L1::MASK & L3::MASK), 0);
+        assert_eq!((L1::MASK & L4::MASK), 0);
+        assert_eq!((L2::MASK & L1::MASK), 0);
+        assert_eq!((L2::MASK & L3::MASK), 0);
+        assert_eq!((L2::MASK & L4::MASK), 0);
+        assert_eq!((L3::MASK & L1::MASK), 0);
+        assert_eq!((L3::MASK & L2::MASK), 0);
+        assert_eq!((L3::MASK & L4::MASK), 0);
+        assert_eq!((L4::MASK & L1::MASK), 0);
+        assert_eq!((L4::MASK & L2::MASK), 0);
+        assert_eq!((L4::MASK & L3::MASK), 0);
+    }
+
+    #[test]
     fn test_iter_bits() {
         assert_eq!(Vec::<u32>::new(), IterBits(0).collect::<Vec<_>>());
         assert_eq!(vec![0], IterBits(1).collect::<Vec<_>>());
@@ -503,16 +573,14 @@ mod tests {
 
     #[test]
     fn test_chunks_iter() {
+        let mut chunks = [0; 512];
+        chunks[0] = 0x8000_0000_0000_0001;
+        chunks[1] = 0x8000_0000_0000_0001;
+        chunks[2] = 0x8000_0000_0000_0001;
+        chunks[3] = 0x8000_0000_0000_0001;
         assert_eq!(
             vec![0, 63, 64, 127, 128, 191, 192, 255],
-            Chunks([
-                0x8000_0000_0000_0001,
-                0x8000_0000_0000_0001,
-                0x8000_0000_0000_0001,
-                0x8000_0000_0000_0001
-            ])
-            .iter()
-            .collect::<Vec<_>>()
+            Chunks(chunks).iter().collect::<Vec<_>>()
         );
     }
 
@@ -555,43 +623,76 @@ mod tests {
     #[test]
     fn test_space_used() {
         const BASE_SIZE: usize = std::mem::size_of::<SparseBitSet>();
-        const TABLE_SIZE: usize = 256 * std::mem::size_of::<usize>();
-        const CHUNKS_SIZE: usize = 256 / 8;
+        const L1_TABLE_SIZE: usize = std::mem::size_of::<L1>();
+        const L2_TABLE_SIZE: usize = std::mem::size_of::<L2>();
+        const L3_TABLE_SIZE: usize = std::mem::size_of::<L3>();
+        const L4_TABLE_SIZE: usize = std::mem::size_of::<L4>();
+
+        const L1_MIN: u32 = 0;
+        const L1_MAX: u32 = L1::MASK | L1::CHILD_MASK;
+        const L2_MIN: u32 = L1_MAX + 1;
+        const L2_MAX: u32 = L2::MASK | L2::CHILD_MASK;
 
         let mut bs = SparseBitSet::new();
         assert_eq!(BASE_SIZE, bs.space_used());
-        bs.set_bit(1);
-        assert_eq!(BASE_SIZE + CHUNKS_SIZE, bs.space_used());
-        bs.set_bit((1 << 8) - 1);
-        assert_eq!(BASE_SIZE + CHUNKS_SIZE, bs.space_used());
-        bs.set_bit(1 << 8);
+
+        bs.set_bit(L1_MIN);
+        assert_eq!(BASE_SIZE + L1_TABLE_SIZE, bs.space_used());
+
+        bs.set_bit(L1_MAX);
+        assert_eq!(BASE_SIZE + L1_TABLE_SIZE, bs.space_used());
+
+        bs.set_bit(L2_MIN);
         assert_eq!(
-            BASE_SIZE + CHUNKS_SIZE + TABLE_SIZE + CHUNKS_SIZE,
+            BASE_SIZE + (2 * L1_TABLE_SIZE) + L2_TABLE_SIZE,
             bs.space_used()
         );
-        bs.set_bit((1 << 16) - 1);
+
+        bs.set_bit(L2_MAX);
         assert_eq!(
-            BASE_SIZE + CHUNKS_SIZE + TABLE_SIZE + CHUNKS_SIZE + CHUNKS_SIZE,
+            BASE_SIZE + (3 * L1_TABLE_SIZE) + L2_TABLE_SIZE,
             bs.space_used()
         );
-        bs.set_bit(1 << 16);
+
+        if L2_MAX == u32::MAX {
+            return;
+        }
+        let l3_min: u32 = L2_MAX.saturating_add(1);
+        let l3_max: u32 = L3::MASK | L3::CHILD_MASK;
+
+        bs.set_bit(l3_min);
         assert_eq!(
-            BASE_SIZE + (4 * CHUNKS_SIZE) + (3 * TABLE_SIZE),
+            BASE_SIZE + (4 * L1_TABLE_SIZE) + (2 * L2_TABLE_SIZE) + L3_TABLE_SIZE,
             bs.space_used()
         );
-        bs.set_bit((1 << 24) - 1);
+
+        bs.set_bit(l3_max);
         assert_eq!(
-            BASE_SIZE + (5 * CHUNKS_SIZE) + (4 * TABLE_SIZE),
+            BASE_SIZE + (5 * L1_TABLE_SIZE) + (3 * L2_TABLE_SIZE) + L3_TABLE_SIZE,
             bs.space_used()
         );
-        bs.set_bit(1 << 24);
+
+        if l3_max == u32::MAX {
+            return;
+        }
+        let l4_min: u32 = l3_max.saturating_add(1);
+        let l4_max: u32 = L4::MASK | L4::CHILD_MASK;
+        bs.set_bit(l4_min);
         assert_eq!(
-            BASE_SIZE + (6 * CHUNKS_SIZE) + (7 * TABLE_SIZE),
+            BASE_SIZE
+                + (6 * L1_TABLE_SIZE)
+                + (4 * L2_TABLE_SIZE)
+                + (2 * L3_TABLE_SIZE)
+                + L4_TABLE_SIZE,
             bs.space_used()
         );
-        bs.set_bit(u32::MAX);
+        bs.set_bit(l4_max);
         assert_eq!(
-            BASE_SIZE + (7 * CHUNKS_SIZE) + (9 * TABLE_SIZE),
+            BASE_SIZE
+                + (7 * L1_TABLE_SIZE)
+                + (5 * L2_TABLE_SIZE)
+                + (3 * L3_TABLE_SIZE)
+                + L4_TABLE_SIZE,
             bs.space_used()
         );
     }
