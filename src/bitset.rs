@@ -240,7 +240,6 @@ impl SparseBitSet {
     }
 }
 
-#[derive(Debug)]
 pub struct SparseBitSetIter<'a>(SparseBitSetIterState<'a>);
 impl<'a> Iterator for SparseBitSetIter<'a> {
     type Item = u32;
@@ -261,7 +260,6 @@ impl<'a> Iterator for SparseBitSetIter<'a> {
     }
 }
 
-#[derive(Debug)]
 enum SparseBitSetIterState<'a> {
     Init,
     OneLevel {
@@ -367,22 +365,35 @@ trait Walker {
     fn iter(&self) -> Self::Iter<'_>;
     fn space_used(&self) -> usize;
 }
+trait Node: Walker {
+    type ChildNode;
+}
 
 #[derive(Debug)]
 struct Table<const NUM_ENTRIES: usize, ChildTable>([Option<Box<ChildTable>>; NUM_ENTRIES])
 where
     ChildTable: Debug;
+
+impl<const NUM_ENTRIES: usize, ChildTable> Node for Table<NUM_ENTRIES, ChildTable>
+where
+    ChildTable: Debug + Walker,
+{
+    type ChildNode = ChildTable;
+}
+
 impl<const NUM_ENTRIES: usize, ChildTable> Walker for Table<NUM_ENTRIES, ChildTable>
 where
     ChildTable: Debug + Walker,
 {
-    const MASK: u32 = (NUM_ENTRIES as u32 -1) << (32-ChildTable::MASK.leading_zeros());
-    type Iter<'a> = TableIter<'a, NUM_ENTRIES, ChildTable> where ChildTable: 'a;
+    const MASK: u32 = (NUM_ENTRIES as u32 - 1) << (32 - ChildTable::MASK.leading_zeros());
+    type Iter<'a> = TableIter<'a, NUM_ENTRIES, Self> where Self: 'a;
 
     fn new() -> Self {
         // safety: Option<Box<T>> is guaranteed for ffi interop to be a nullable
         // pointer. zeroed() is therefore a valid initialization.
-        Table(unsafe { MaybeUninit::<[Option<Box<ChildTable>>; NUM_ENTRIES]>::zeroed().assume_init() })
+        Table(unsafe {
+            MaybeUninit::<[Option<Box<ChildTable>>; NUM_ENTRIES]>::zeroed().assume_init()
+        })
     }
     fn walk(&self, bit_idx: u32) -> Option<&u64> {
         let offset = (bit_idx & Self::MASK) >> Self::MASK.trailing_zeros();
@@ -424,26 +435,28 @@ where
     }
 }
 
-#[derive(Debug)]
-struct TableIter<'a, const NUM_ENTRIES: usize, ChildTable>
+struct TableIter<'a, const NUM_ENTRIES: usize, Table>
 where
-    ChildTable: Walker + 'a,
+    Table: Node + 'a,
+    Table::ChildNode: Walker + 'a,
 {
-    table_iter: std::iter::Enumerate<std::slice::Iter<'a, Option<Box<ChildTable>>>>,
+    table_iter: std::iter::Enumerate<std::slice::Iter<'a, Option<Box<Table::ChildNode>>>>,
     child_offset: u32,
-    child_iter: ChildTable::Iter<'a>,
+    child_iter: <<Table as Node>::ChildNode as Walker>::Iter<'a>,
 }
-impl<'a, const NUM_ENTRIES: usize, ChildTable> TableIter<'a, NUM_ENTRIES, ChildTable>
+impl<'a, const NUM_ENTRIES: usize, Table> TableIter<'a, NUM_ENTRIES, Table>
 where
-    ChildTable: Walker + 'a,
+    Table: Node + 'a,
+    Table::ChildNode: Walker + 'a,
 {
     fn mask() -> u32 {
-        (NUM_ENTRIES as u32 - 1) << (32-ChildTable::MASK.leading_zeros())
+        (NUM_ENTRIES as u32 - 1) << (32 - Table::ChildNode::MASK.leading_zeros())
     }
 }
-impl<'a, const NUM_ENTRIES: usize, ChildTable> Iterator for TableIter<'a, NUM_ENTRIES, ChildTable>
+impl<'a, const NUM_ENTRIES: usize, Table> Iterator for TableIter<'a, NUM_ENTRIES, Table>
 where
-    ChildTable: Walker + 'a,
+    Table: Debug + Node + 'a,
+    Table::ChildNode: Debug + Walker + 'a,
 {
     type Item = u32;
     fn next(&mut self) -> Option<Self::Item> {
