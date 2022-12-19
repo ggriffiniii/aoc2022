@@ -9,14 +9,14 @@ enum State {
     },
     TwoLevel {
         start_idx: u32,
-        tables: Box<Table<2, Chunks>>,
+        tables: Box<Table<256, Chunks>>,
     },
     ThreeLevel {
         start_idx: u32,
-        tables: Box<Table<3, Table<2, Chunks>>>,
+        tables: Box<Table<256, Table<256, Chunks>>>,
     },
     FourLevel {
-        tables: Box<Table<4, Table<3, Table<2, Chunks>>>>,
+        tables: Box<Table<256, Table<256, Table<256, Chunks>>>>,
     },
 }
 
@@ -270,14 +270,14 @@ enum SparseBitSetIterState<'a> {
     },
     TwoLevel {
         start_idx: u32,
-        iter: <Table<2, Chunks> as Walker>::Iter<'a>,
+        iter: <Table<256, Chunks> as Walker>::Iter<'a>,
     },
     ThreeLevel {
         start_idx: u32,
-        iter: <Table<3, Table<2, Chunks>> as Walker>::Iter<'a>,
+        iter: <Table<256, Table<256, Chunks>> as Walker>::Iter<'a>,
     },
     FourLevel {
-        iter: <Table<4, Table<3, Table<2, Chunks>>> as Walker>::Iter<'a>,
+        iter: <Table<256, Table<256, Table<256, Chunks>>> as Walker>::Iter<'a>,
     },
 }
 
@@ -296,6 +296,8 @@ impl Chunks {
     }
 }
 impl Walker for Chunks {
+    const MASK: u32 = std::mem::size_of::<Self>() as u32 * 8 - 1;
+
     type Iter<'a> = ChunksIter<'a>;
     fn new() -> Self {
         Chunks([0; 4])
@@ -354,6 +356,7 @@ impl Iterator for IterBits {
 }
 
 trait Walker {
+    const MASK: u32;
     type Iter<'a>: Iterator<Item = u32>
     where
         Self: 'a;
@@ -366,29 +369,31 @@ trait Walker {
 }
 
 #[derive(Debug)]
-struct Table<const LEVEL: u32, ChildTable>([Option<Box<ChildTable>>; 256])
+struct Table<const NUM_ENTRIES: usize, ChildTable>([Option<Box<ChildTable>>; NUM_ENTRIES])
 where
     ChildTable: Debug;
-impl<const LEVEL: u32, ChildTable> Walker for Table<LEVEL, ChildTable>
+impl<const NUM_ENTRIES: usize, ChildTable> Walker for Table<NUM_ENTRIES, ChildTable>
 where
     ChildTable: Debug + Walker,
 {
-    type Iter<'a> = TableIter<'a, LEVEL, ChildTable> where ChildTable: 'a;
+    const MASK: u32 = (NUM_ENTRIES as u32 -1) << (32-ChildTable::MASK.leading_zeros());
+    type Iter<'a> = TableIter<'a, NUM_ENTRIES, ChildTable> where ChildTable: 'a;
 
     fn new() -> Self {
         // safety: Option<Box<T>> is guaranteed for ffi interop to be a nullable
         // pointer. zeroed() is therefore a valid initialization.
-        Table(unsafe { MaybeUninit::<[Option<Box<ChildTable>>; 256]>::zeroed().assume_init() })
+        Table(unsafe { MaybeUninit::<[Option<Box<ChildTable>>; NUM_ENTRIES]>::zeroed().assume_init() })
     }
     fn walk(&self, bit_idx: u32) -> Option<&u64> {
-        let offset = bit_idx >> ((LEVEL - 1) * 8) & 0xff;
+        let offset = (bit_idx & Self::MASK) >> Self::MASK.trailing_zeros();
         self.0[offset as usize]
             .as_ref()
             .and_then(|child_table| child_table.walk(bit_idx))
     }
 
     fn walk_or_create(&mut self, bit_idx: u32) -> &mut u64 {
-        let offset = bit_idx >> ((LEVEL - 1) * 8) & 0xff;
+        //eprintln!("{:0x}", Self::MASK);
+        let offset = (bit_idx & Self::MASK) >> Self::MASK.trailing_zeros();
         self.0[offset as usize]
             .get_or_insert_with(|| Box::new(ChildTable::new()))
             .walk_or_create(bit_idx)
@@ -398,7 +403,7 @@ where
         let mut table_iter = self.0.iter().enumerate();
         let (child_offset, child) = table_iter
             .find_map(|(child_offset, child)| {
-                let child_offset = (child_offset as u32) << ((LEVEL - 1) * 8);
+                let child_offset = (child_offset as u32) << Self::MASK.trailing_zeros();
                 Some((child_offset, child.as_ref()?))
             })
             .expect("unexpected table with no children");
@@ -420,12 +425,23 @@ where
 }
 
 #[derive(Debug)]
-struct TableIter<'a, const LEVEL: u32, ChildTable: Walker + 'a> {
+struct TableIter<'a, const NUM_ENTRIES: usize, ChildTable>
+where
+    ChildTable: Walker + 'a,
+{
     table_iter: std::iter::Enumerate<std::slice::Iter<'a, Option<Box<ChildTable>>>>,
     child_offset: u32,
     child_iter: ChildTable::Iter<'a>,
 }
-impl<'a, const LEVEL: u32, ChildTable> Iterator for TableIter<'a, LEVEL, ChildTable>
+impl<'a, const NUM_ENTRIES: usize, ChildTable> TableIter<'a, NUM_ENTRIES, ChildTable>
+where
+    ChildTable: Walker + 'a,
+{
+    fn mask() -> u32 {
+        (NUM_ENTRIES as u32 - 1) << (32-ChildTable::MASK.leading_zeros())
+    }
+}
+impl<'a, const NUM_ENTRIES: usize, ChildTable> Iterator for TableIter<'a, NUM_ENTRIES, ChildTable>
 where
     ChildTable: Walker + 'a,
 {
@@ -438,7 +454,7 @@ where
             loop {
                 match self.table_iter.next() {
                     Some((child_idx, Some(next_child))) => {
-                        self.child_offset = (child_idx as u32) << ((LEVEL - 1) * 8);
+                        self.child_offset = (child_idx as u32) << Self::mask().trailing_zeros();
                         self.child_iter = next_child.iter();
                         break;
                     }
