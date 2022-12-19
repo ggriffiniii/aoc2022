@@ -1,4 +1,4 @@
-use crate::bitset::SparseBitSet;
+use crate::bitset::RadixBitSet;
 
 use aoc_runner_derive::aoc;
 
@@ -24,10 +24,10 @@ impl Pos {
 }
 
 #[derive(Debug)]
-struct World(SparseBitSet);
+struct World(RadixBitSet);
 impl World {
     fn new() -> Self {
-        World(SparseBitSet::new())
+        World(RadixBitSet::new())
     }
     fn insert(&mut self, pos: Pos) {
         self.0.set_bit(pos.0 as u32);
@@ -126,7 +126,7 @@ pub fn part2(input: &str) -> usize {
         });
     let mut visited = World::new();
     let mut cache = World::new();
-    world
+    let sum = world
         .iter()
         .map(|cube| {
             neighbors_of(cube)
@@ -138,5 +138,8 @@ pub fn part2(input: &str) -> usize {
                 })
                 .count()
         })
-        .sum()
+        .sum();
+    dbg!(visited.0.space_used());
+    dbg!(cache.0.space_used());
+    sum
 }

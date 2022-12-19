@@ -45,18 +45,18 @@ enum State {
 }
 
 #[derive(Debug)]
-pub struct SparseBitSet {
+pub struct RadixBitSet {
     state: State,
     len: u32, // number of bits set
 }
-impl Default for SparseBitSet {
+impl Default for RadixBitSet {
     fn default() -> Self {
-        SparseBitSet::new()
+        RadixBitSet::new()
     }
 }
-impl SparseBitSet {
+impl RadixBitSet {
     pub fn new() -> Self {
-        SparseBitSet {
+        RadixBitSet {
             state: State::Init,
             len: 0,
         }
@@ -78,7 +78,7 @@ impl SparseBitSet {
             State::OneLevel { start_idx, chunks } => {
                 // expand
                 let mut tables = Box::new(Table::new());
-                tables.0[tables.offset_from_value(start_idx)] = Some(chunks);
+                *tables.get_entry_mut(start_idx) = Some(chunks);
                 Self::expand_if_necessary(
                     State::TwoLevel {
                         start_idx: start_idx & !(L2::MASK | L2::CHILD_MASK),
@@ -99,7 +99,7 @@ impl SparseBitSet {
             } => {
                 // expand
                 let mut tables = Box::new(Table::new());
-                tables.0[tables.offset_from_value(start_idx)] = Some(l2_table);
+                *tables.get_entry_mut(start_idx) = Some(l2_table);
                 Self::expand_if_necessary(
                     State::ThreeLevel {
                         start_idx: start_idx & !(L3::MASK | L3::CHILD_MASK),
@@ -120,7 +120,7 @@ impl SparseBitSet {
             } => {
                 // expand
                 let mut tables = Box::new(Table::new());
-                tables.0[tables.offset_from_value(start_idx)] = Some(l3_table);
+                *tables.get_entry_mut(start_idx) = Some(l3_table);
                 State::FourLevel { tables }
             }
             State::FourLevel { tables } => {
@@ -233,22 +233,22 @@ impl SparseBitSet {
         }
     }
 
-    pub fn iter(&self) -> SparseBitSetIter {
-        SparseBitSetIter(match &self.state {
-            State::Init => SparseBitSetIterState::Init,
-            State::OneLevel { start_idx, chunks } => SparseBitSetIterState::OneLevel {
+    pub fn iter(&self) -> RadixBitSetIter {
+        RadixBitSetIter(match &self.state {
+            State::Init => RadixBitSetIterState::Init,
+            State::OneLevel { start_idx, chunks } => RadixBitSetIterState::OneLevel {
                 start_idx: *start_idx,
                 iter: chunks.iter(),
             },
-            State::TwoLevel { start_idx, tables } => SparseBitSetIterState::TwoLevel {
+            State::TwoLevel { start_idx, tables } => RadixBitSetIterState::TwoLevel {
                 start_idx: *start_idx,
                 iter: tables.iter(),
             },
-            State::ThreeLevel { start_idx, tables } => SparseBitSetIterState::ThreeLevel {
+            State::ThreeLevel { start_idx, tables } => RadixBitSetIterState::ThreeLevel {
                 start_idx: *start_idx,
                 iter: tables.iter(),
             },
-            State::FourLevel { tables } => SparseBitSetIterState::FourLevel {
+            State::FourLevel { tables } => RadixBitSetIterState::FourLevel {
                 iter: tables.iter(),
             },
         })
@@ -279,27 +279,27 @@ impl SparseBitSet {
     }
 }
 
-pub struct SparseBitSetIter<'a>(SparseBitSetIterState<'a>);
-impl<'a> Iterator for SparseBitSetIter<'a> {
+pub struct RadixBitSetIter<'a>(RadixBitSetIterState<'a>);
+impl<'a> Iterator for RadixBitSetIter<'a> {
     type Item = u32;
     fn next(&mut self) -> Option<u32> {
         match &mut self.0 {
-            SparseBitSetIterState::Init => None,
-            SparseBitSetIterState::OneLevel { start_idx, iter } => {
+            RadixBitSetIterState::Init => None,
+            RadixBitSetIterState::OneLevel { start_idx, iter } => {
                 iter.next().map(|idx| idx | *start_idx)
             }
-            SparseBitSetIterState::TwoLevel { start_idx, iter } => {
+            RadixBitSetIterState::TwoLevel { start_idx, iter } => {
                 iter.next().map(|idx| idx | *start_idx)
             }
-            SparseBitSetIterState::ThreeLevel { start_idx, iter } => {
+            RadixBitSetIterState::ThreeLevel { start_idx, iter } => {
                 iter.next().map(|idx| idx | *start_idx)
             }
-            SparseBitSetIterState::FourLevel { iter } => iter.next(),
+            RadixBitSetIterState::FourLevel { iter } => iter.next(),
         }
     }
 }
 
-enum SparseBitSetIterState<'a> {
+enum RadixBitSetIterState<'a> {
     Init,
     OneLevel {
         start_idx: u32,
@@ -307,14 +307,14 @@ enum SparseBitSetIterState<'a> {
     },
     TwoLevel {
         start_idx: u32,
-        iter: <L2 as Walker>::Iter<'a>,
+        iter: <L2 as Node>::Iter<'a>,
     },
     ThreeLevel {
         start_idx: u32,
-        iter: <L3 as Walker>::Iter<'a>,
+        iter: <L3 as Node>::Iter<'a>,
     },
     FourLevel {
-        iter: <L4 as Walker>::Iter<'a>,
+        iter: <L4 as Node>::Iter<'a>,
     },
 }
 
@@ -332,7 +332,7 @@ impl<const N: usize> Chunks<N> {
         }
     }
 }
-impl<const N: usize> Walker for Chunks<N> {
+impl<const N: usize> Node for Chunks<N> {
     const CHILD_MASK: u32 = 0;
     const MASK: u32 = std::mem::size_of::<Self>() as u32 * 8 - 1;
 
@@ -393,7 +393,7 @@ impl Iterator for IterBits {
     }
 }
 
-trait Walker {
+trait Node {
     const CHILD_MASK: u32;
     const MASK: u32;
     type Iter<'a>: Iterator<Item = u32>
@@ -406,25 +406,26 @@ trait Walker {
     fn iter(&self) -> Self::Iter<'_>;
     fn space_used(&self) -> usize;
 }
-trait Node: Walker {
+trait InternalNode: Node {
     type ChildNode;
 }
 
 #[derive(Debug)]
-struct Table<const NUM_ENTRIES: usize, ChildTable>([Option<Box<ChildTable>>; NUM_ENTRIES])
+struct Table<const NUM_ENTRIES: usize, ChildNode>([Option<Box<ChildNode>>; NUM_ENTRIES])
 where
-    ChildTable: Debug;
+    ChildNode: Debug;
 
-impl<const NUM_ENTRIES: usize, ChildTable> Node for Table<NUM_ENTRIES, ChildTable>
+impl<const NUM_ENTRIES: usize, ChildNode> InternalNode for Table<NUM_ENTRIES, ChildNode>
 where
-    ChildTable: Debug + Walker,
+    ChildNode: Debug + Node,
 {
-    type ChildNode = ChildTable;
+    type ChildNode = ChildNode;
 }
-impl<const NUM_ENTRIES: usize, ChildTable> Table<NUM_ENTRIES, ChildTable>
+
+impl<const NUM_ENTRIES: usize, ChildNode> Table<NUM_ENTRIES, ChildNode>
 where
-    Self: Debug + Walker,
-    ChildTable: Debug + Walker,
+    Self: Debug + Node,
+    ChildNode: Debug + Node,
 {
     const fn mask(num_entries: usize, child_mask: u32) -> u32 {
         if num_entries == 0 {
@@ -434,16 +435,22 @@ where
         }
     }
 
-    const fn offset_from_value(&self, v: u32) -> usize {
-        ((v & Self::MASK) >> Self::CHILD_MASK.trailing_ones()) as usize
+    fn get_entry(&self, bit_idx: u32) -> Option<&ChildNode> {
+        self.0[((bit_idx & Self::MASK) >> Self::CHILD_MASK.trailing_ones()) as usize]
+            .as_ref()
+            .map(|x| &**x)
+    }
+
+    fn get_entry_mut(&mut self, bit_idx: u32) -> &mut Option<Box<ChildNode>> {
+        &mut self.0[((bit_idx & Self::MASK) >> Self::CHILD_MASK.trailing_ones()) as usize]
     }
 }
 
-impl<const NUM_ENTRIES: usize, ChildTable> Walker for Table<NUM_ENTRIES, ChildTable>
+impl<const NUM_ENTRIES: usize, ChildNode> Node for Table<NUM_ENTRIES, ChildNode>
 where
-    ChildTable: Debug + Walker,
+    ChildNode: Debug + Node,
 {
-    const CHILD_MASK: u32 = ChildTable::MASK | ChildTable::CHILD_MASK;
+    const CHILD_MASK: u32 = ChildNode::MASK | ChildNode::CHILD_MASK;
     const MASK: u32 = Self::mask(NUM_ENTRIES, Self::CHILD_MASK);
     type Iter<'a> = TableIter<'a, NUM_ENTRIES, Self> where Self: 'a;
 
@@ -451,21 +458,17 @@ where
         // safety: Option<Box<T>> is guaranteed for ffi interop to be a nullable
         // pointer. zeroed() is therefore a valid initialization.
         Table(unsafe {
-            MaybeUninit::<[Option<Box<ChildTable>>; NUM_ENTRIES]>::zeroed().assume_init()
+            MaybeUninit::<[Option<Box<ChildNode>>; NUM_ENTRIES]>::zeroed().assume_init()
         })
     }
     fn walk(&self, bit_idx: u32) -> Option<&usize> {
-        let offset = (bit_idx & Self::MASK) >> Self::CHILD_MASK.trailing_ones();
-        self.0[offset as usize]
-            .as_ref()
+        self.get_entry(bit_idx)
             .and_then(|child_table| child_table.walk(bit_idx))
     }
 
     fn walk_or_create(&mut self, bit_idx: u32) -> &mut usize {
-        //eprintln!("{:0x}", Self::MASK);
-        let offset = (bit_idx & Self::MASK) >> Self::CHILD_MASK.trailing_ones();
-        self.0[offset as usize]
-            .get_or_insert_with(|| Box::new(ChildTable::new()))
+        self.get_entry_mut(bit_idx)
+            .get_or_insert_with(|| Box::new(ChildNode::new()))
             .walk_or_create(bit_idx)
     }
 
@@ -496,17 +499,17 @@ where
 
 struct TableIter<'a, const NUM_ENTRIES: usize, Table>
 where
-    Table: Node + 'a,
-    Table::ChildNode: Walker + 'a,
+    Table: InternalNode + 'a,
+    Table::ChildNode: Node + 'a,
 {
     table_iter: std::iter::Enumerate<std::slice::Iter<'a, Option<Box<Table::ChildNode>>>>,
     child_offset: u32,
-    child_iter: <<Table as Node>::ChildNode as Walker>::Iter<'a>,
+    child_iter: <<Table as InternalNode>::ChildNode as Node>::Iter<'a>,
 }
 impl<'a, const NUM_ENTRIES: usize, Table> Iterator for TableIter<'a, NUM_ENTRIES, Table>
 where
-    Table: Debug + Node + 'a,
-    Table::ChildNode: Debug + Walker + 'a,
+    Table: Debug + InternalNode + 'a,
+    Table::ChildNode: Debug + Node + 'a,
 {
     type Item = u32;
     fn next(&mut self) -> Option<Self::Item> {
@@ -589,7 +592,7 @@ mod tests {
 
     #[test]
     fn test_sparse_bit_set_iter() {
-        let mut bs = SparseBitSet::new();
+        let mut bs = RadixBitSet::new();
         let mut bits = vec![1 << 8, u32::MAX, 1 << 0, 1 << 16];
         for bit in bits.iter().copied() {
             bs.set_bit(bit);
@@ -600,7 +603,7 @@ mod tests {
 
     #[test]
     fn test_sparse_bit_set() {
-        let mut bs = SparseBitSet::new();
+        let mut bs = RadixBitSet::new();
         assert!(!bs.test_bit(0));
         bs.set_bit(0);
         assert!(bs.test_bit(0));
@@ -624,8 +627,19 @@ mod tests {
     }
 
     #[test]
+    fn worst_case_space_used() {
+        let mut bs = RadixBitSet::new();
+        let end = (!0) >> L1_BIT_WIDTH;
+        dbg!(end);
+        for i in 0..=end {
+            bs.set_bit(i << L1_BIT_WIDTH);
+        }
+        dbg!(bs.space_used());
+    }
+
+    #[test]
     fn test_space_used() {
-        const BASE_SIZE: usize = std::mem::size_of::<SparseBitSet>();
+        const BASE_SIZE: usize = std::mem::size_of::<RadixBitSet>();
         const L1_TABLE_SIZE: usize = std::mem::size_of::<L1>();
         const L2_TABLE_SIZE: usize = std::mem::size_of::<L2>();
         const L3_TABLE_SIZE: usize = std::mem::size_of::<L3>();
@@ -636,7 +650,7 @@ mod tests {
         const L2_MIN: u32 = L1_MAX + 1;
         const L2_MAX: u32 = L2::MASK | L2::CHILD_MASK;
 
-        let mut bs = SparseBitSet::new();
+        let mut bs = RadixBitSet::new();
         assert_eq!(BASE_SIZE, bs.space_used());
 
         bs.set_bit(L1_MIN);
@@ -703,7 +717,7 @@ mod tests {
     proptest! {
       #[test]
       fn test_properties(mut values: Vec<u32>) {
-        let mut bs = SparseBitSet::new();
+        let mut bs = RadixBitSet::new();
         for v in values.iter().copied() {
             assert!(bs.set_bit(v));
         }
