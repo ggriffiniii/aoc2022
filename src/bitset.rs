@@ -55,6 +55,7 @@ impl Default for RadixBitSet {
     }
 }
 impl RadixBitSet {
+    #[inline]
     pub fn new() -> Self {
         RadixBitSet {
             state: State::Init,
@@ -130,6 +131,7 @@ impl RadixBitSet {
         }
     }
 
+    #[inline]
     pub fn set_bit(&mut self, bit_idx: u32) -> bool {
         let state = std::mem::replace(&mut self.state, State::Init);
         self.state = Self::expand_if_necessary(state, bit_idx);
@@ -164,6 +166,7 @@ impl RadixBitSet {
         inserted
     }
 
+    #[inline]
     pub fn clear_bit(&mut self, bit_idx: u32) -> bool {
         let removed = match &mut self.state {
             State::Init => false,
@@ -196,6 +199,7 @@ impl RadixBitSet {
         removed
     }
 
+    #[inline]
     pub fn test_bit(&self, bit_idx: u32) -> bool {
         match &self.state {
             State::Init => false,
@@ -233,6 +237,7 @@ impl RadixBitSet {
         }
     }
 
+    #[inline]
     pub fn iter(&self) -> RadixBitSetIter {
         RadixBitSetIter(match &self.state {
             State::Init => RadixBitSetIterState::Init,
@@ -254,6 +259,7 @@ impl RadixBitSet {
         })
     }
 
+    #[inline]
     pub fn len(&self) -> u32 {
         self.len
     }
@@ -282,6 +288,7 @@ impl RadixBitSet {
 pub struct RadixBitSetIter<'a>(RadixBitSetIterState<'a>);
 impl<'a> Iterator for RadixBitSetIter<'a> {
     type Item = u32;
+    #[inline]
     fn next(&mut self) -> Option<u32> {
         match &mut self.0 {
             RadixBitSetIterState::Init => None,
