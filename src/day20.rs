@@ -6,7 +6,6 @@ fn wrap_idx(max_len: usize, value: isize) -> usize {
 
 fn mix(input: &[isize], positions: &mut Vec<usize>) {
     for (input_idx, value) in input.iter().copied().enumerate() {
-        print_line(input, &*positions);
         let pos = positions.iter().position(|&pos| pos == input_idx).unwrap();
         positions.remove(pos);
         let new_pos = wrap_idx(positions.len(), pos as isize + value);
@@ -14,17 +13,8 @@ fn mix(input: &[isize], positions: &mut Vec<usize>) {
     }
 }
 
-fn print_line(input: &[isize], positions: &[usize]) {
-    let mut v = vec![0; input.len()];
-    for idx in 0..input.len() {
-        v[positions[idx]] = input[idx];
-    }
-    println!("{:?}", v);
-}
 #[aoc(day20, part1)]
 pub fn part1(input: &str) -> isize {
-    let input = EXAMPLE;
-
     let input: Vec<isize> = input.lines().map(|line| line.parse().unwrap()).collect();
     let mut positions: Vec<usize> = (0usize..input.len()).collect();
     mix(&input, &mut positions);
@@ -61,11 +51,3 @@ pub fn part2(input: &str) -> isize {
         .map(|offset| input[positions[wrap_idx(input.len(), current_zero_idx as isize + offset)]])
         .sum()
 }
-
-const EXAMPLE: &str = "1
-2
--3
-3
--2
-0
-4";

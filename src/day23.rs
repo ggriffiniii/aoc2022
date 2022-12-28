@@ -32,7 +32,7 @@ pub fn part1(input: &str) -> usize {
             line.bytes()
                 .enumerate()
                 .filter(|(_col, b)| *b == b'#')
-                .map(move |(col, b)| (col as isize, row as isize))
+                .map(move |(col, _b)| (col as isize, row as isize))
         })
         .collect();
     for dir in Direction::North.iter().take(10) {
@@ -102,7 +102,7 @@ pub fn part2(input: &str) -> usize {
             line.bytes()
                 .enumerate()
                 .filter(|(_col, b)| *b == b'#')
-                .map(move |(col, b)| (col as isize, row as isize))
+                .map(move |(col, _b)| (col as isize, row as isize))
         })
         .collect();
     for (loop_iter, dir) in Direction::North.iter().enumerate() {
