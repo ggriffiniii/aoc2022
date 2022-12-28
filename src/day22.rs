@@ -2,8 +2,9 @@ use std::{
     collections::HashMap,
     convert::Infallible,
     fmt::{self, Write},
+    iter::Sum,
     ops::{Add, Rem},
-    str::FromStr, iter::Sum,
+    str::FromStr,
 };
 
 use aoc_runner_derive::aoc;
@@ -68,7 +69,7 @@ impl fmt::Display for Map {
             for tile in row {
                 write!(f, "{}", tile)?;
             }
-            writeln!(f, "")?;
+            writeln!(f)?;
         }
         Ok(())
     }
@@ -91,10 +92,7 @@ impl FromStr for Map {
                 };
             }
         }
-        Ok(Map {
-            data,
-            width,
-        })
+        Ok(Map { data, width })
     }
 }
 
@@ -164,7 +162,7 @@ impl<'a> Person<'a> {
                     Direction::Left => {
                         let row_start = (self.pos / self.map.width * self.map.width) as isize;
                         let mut p = self.pos as isize - 1;
-                        if p < row_start as isize {
+                        if p < row_start {
                             p = row_start + self.map.width as isize - 1;
                         }
                         p.try_into().unwrap()
@@ -173,7 +171,7 @@ impl<'a> Person<'a> {
                         .rem_euclid(self.map.data.len() as isize)
                         as usize,
                 };
-                self.pos = new_pos.try_into().unwrap();
+                self.pos = new_pos;
                 Some((self.pos, self.map.data[self.pos]))
             }
         }
@@ -244,33 +242,33 @@ impl Rem<usize> for XYZ {
 }
 impl Sum for XYZ {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        iter.reduce(|sum, e| sum + e).unwrap_or(XYZ{x: 0, y: 0, z: 0})
+        iter.reduce(|sum, e| sum + e)
+            .unwrap_or(XYZ { x: 0, y: 0, z: 0 })
     }
 }
 
 #[derive(Debug, Clone)]
 struct FaceCoords([XYZ; 4]);
 impl FaceCoords {
-    fn top_left(&self) -> &XYZ {
-        &self.0[0]
+    fn top_left(&self) -> XYZ {
+        self.0[0]
     }
-    fn top_right(&self) -> &XYZ {
-        &self.0[1]
+    fn top_right(&self) -> XYZ {
+        self.0[1]
     }
-    fn bottom_right(&self) -> &XYZ {
-        &self.0[2]
+    fn bottom_right(&self) -> XYZ {
+        self.0[2]
     }
-    fn bottom_left(&self) -> &XYZ {
-        &self.0[3]
+    fn bottom_left(&self) -> XYZ {
+        self.0[3]
     }
 }
 
-#[derive(Debug,Eq,PartialEq,Clone,Copy)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
 struct CubePos {
     face_idx: usize,
     face_pos: usize,
 }
-
 
 #[derive(Debug)]
 struct Cube {
@@ -319,15 +317,19 @@ impl FromStr for Cube {
 
 impl Cube {
     fn start_pos(&self) -> CubePos {
-        self.faces.iter().enumerate().find_map(|(idx, face)| {
-            if face.is_none() {
-                return None;
-            }
-            Some(CubePos{
-                face_idx: idx,
-                face_pos: 0,
+        self.faces
+            .iter()
+            .enumerate()
+            .find_map(|(idx, face)| {
+                if face.is_none() {
+                    return None;
+                }
+                Some(CubePos {
+                    face_idx: idx,
+                    face_pos: 0,
+                })
             })
-        }).unwrap()
+            .unwrap()
     }
     fn face_iter(
         &self,
@@ -339,67 +341,87 @@ impl Cube {
         match dir {
             Direction::Right => {
                 let row_start = row_or_col * self.face_len;
-                Box::new(face.iter().copied().enumerate().skip(row_start).take(self.face_len))
+                Box::new(
+                    face.iter()
+                        .copied()
+                        .enumerate()
+                        .skip(row_start)
+                        .take(self.face_len),
+                )
             }
             Direction::Down => {
                 let col_start = row_or_col;
-                Box::new(std::iter::successors(Some((col_start, face[col_start])), |prev| {
-                    let next = prev.0 + self.face_len;
-                    if next < face.len() {
-                        Some((next, face[next]))
-                    } else {
-                        None
-                    }
-                }))
+                Box::new(std::iter::successors(
+                    Some((col_start, face[col_start])),
+                    |prev| {
+                        let next = prev.0 + self.face_len;
+                        if next < face.len() {
+                            Some((next, face[next]))
+                        } else {
+                            None
+                        }
+                    },
+                ))
             }
             Direction::Left => {
                 let row_start = row_or_col * self.face_len;
-                let row_end = row_start + self.face_len-1;
-                Box::new(std::iter::successors(Some((row_end, face[row_end])), move |prev| {
-                    if prev.0 > row_start {
-                        let next = prev.0 - 1;
-                        Some((next, face[next]))
-                    } else {
-                        None
-                    }
-                }))
+                let row_end = row_start + self.face_len - 1;
+                Box::new(std::iter::successors(
+                    Some((row_end, face[row_end])),
+                    move |prev| {
+                        if prev.0 > row_start {
+                            let next = prev.0 - 1;
+                            Some((next, face[next]))
+                        } else {
+                            None
+                        }
+                    },
+                ))
             }
             Direction::Up => {
                 let col_start = face.len() - self.face_len + row_or_col;
-                Box::new(std::iter::successors(Some((col_start, face[col_start])), |prev| {
-                    if prev.0 >= self.face_len {
-                        let next = prev.0 - self.face_len;
-                        Some((next, face[next]))
-                    } else {
-                        None
-                    }
-                }))
+                Box::new(std::iter::successors(
+                    Some((col_start, face[col_start])),
+                    |prev| {
+                        if prev.0 >= self.face_len {
+                            let next = prev.0 - self.face_len;
+                            Some((next, face[next]))
+                        } else {
+                            None
+                        }
+                    },
+                ))
             }
         }
     }
 
-    fn cube_iter(
-        &self,
-        pos: CubePos,
-        dir: Direction,
-    ) -> CubeIter {
+    fn cube_iter(&self, pos: CubePos, dir: Direction) -> CubeIter {
         let (skip, row_or_col) = match dir {
-            Direction::Right => {
-                (pos.face_pos % self.face_len + 1, pos.face_pos / self.face_len)
-
-            },
-            Direction::Down => {
-                (pos.face_pos / self.face_len + 1, pos.face_pos % self.face_len)
-            },
-            Direction::Left => {
-                ((self.face_len-1) - pos.face_pos % self.face_len + 1, pos.face_pos / self.face_len)
-            },
-            Direction::Up => {
-                ((self.face_len-1) - pos.face_pos / self.face_len + 1, pos.face_pos % self.face_len)
-            },
+            Direction::Right => (
+                pos.face_pos % self.face_len + 1,
+                pos.face_pos / self.face_len,
+            ),
+            Direction::Down => (
+                pos.face_pos / self.face_len + 1,
+                pos.face_pos % self.face_len,
+            ),
+            Direction::Left => (
+                (self.face_len - 1) - pos.face_pos % self.face_len + 1,
+                pos.face_pos / self.face_len,
+            ),
+            Direction::Up => (
+                (self.face_len - 1) - pos.face_pos / self.face_len + 1,
+                pos.face_pos % self.face_len,
+            ),
         };
         let face_iter = Box::new(self.face_iter(pos.face_idx, row_or_col, dir).skip(skip));
-        CubeIter { cube: self, face_iter, face_idx: pos.face_idx, row_or_col, dir }
+        CubeIter {
+            cube: self,
+            face_iter,
+            face_idx: pos.face_idx,
+            row_or_col,
+            dir,
+        }
     }
 
     fn next_face(
@@ -415,69 +437,86 @@ impl Cube {
             Direction::Left => (corners.top_left(), corners.bottom_left()),
             Direction::Up => (corners.top_left(), corners.top_right()),
         };
-        self
-        .corner_coords
-        .iter()
-        .enumerate()
-        .filter(|&(idx, _face)| face_idx != idx)
-        .filter_map(|(idx, face)| face.as_ref().map(|face| (idx, face)))
-        .find_map(|(other_idx, other_face)| {
-            if edge == (other_face.top_left(), other_face.top_right()) {
-                Some((other_idx, row_or_col, Direction::Down))
-            } else if edge == (other_face.top_right(), other_face.top_left()) {
-                Some((other_idx, self.face_len-1-row_or_col, Direction::Down))
-            } else if edge == (other_face.top_right(), other_face.bottom_right()) {
-                Some((other_idx, row_or_col, Direction::Left))
-            } else if edge == (other_face.bottom_right(), other_face.top_right()) {
-                Some((other_idx, self.face_len-1-row_or_col, Direction::Left))
-            } else if edge == (other_face.bottom_right(), other_face.bottom_left()) {
-                Some((other_idx, self.face_len-1-row_or_col, Direction::Up))
-            } else if edge == (other_face.bottom_left(), other_face.bottom_right()) {
-                Some((other_idx, row_or_col, Direction::Up))
-            } else if edge == (other_face.bottom_left(), other_face.top_left()) {
-                Some((other_idx, self.face_len-1-row_or_col, Direction::Right))
-            } else if edge == (other_face.top_left(), other_face.bottom_left()) {
-                Some((other_idx, row_or_col, Direction::Right))
-            } else {
-                None
-            }
-        })
-        .unwrap()
+        self.corner_coords
+            .iter()
+            .enumerate()
+            .filter(|&(idx, _face)| face_idx != idx)
+            .filter_map(|(idx, face)| face.as_ref().map(|face| (idx, face)))
+            .find_map(|(other_idx, other_face)| {
+                if edge == (other_face.top_left(), other_face.top_right()) {
+                    Some((other_idx, row_or_col, Direction::Down))
+                } else if edge == (other_face.top_right(), other_face.top_left()) {
+                    Some((other_idx, self.face_len - 1 - row_or_col, Direction::Down))
+                } else if edge == (other_face.top_right(), other_face.bottom_right()) {
+                    Some((other_idx, row_or_col, Direction::Left))
+                } else if edge == (other_face.bottom_right(), other_face.top_right()) {
+                    Some((other_idx, self.face_len - 1 - row_or_col, Direction::Left))
+                } else if edge == (other_face.bottom_right(), other_face.bottom_left()) {
+                    Some((other_idx, self.face_len - 1 - row_or_col, Direction::Up))
+                } else if edge == (other_face.bottom_left(), other_face.bottom_right()) {
+                    Some((other_idx, row_or_col, Direction::Up))
+                } else if edge == (other_face.bottom_left(), other_face.top_left()) {
+                    Some((other_idx, self.face_len - 1 - row_or_col, Direction::Right))
+                } else if edge == (other_face.top_left(), other_face.bottom_left()) {
+                    Some((other_idx, row_or_col, Direction::Right))
+                } else {
+                    None
+                }
+            })
+            .unwrap()
     }
 }
-        struct CubeIter<'a>{
-            cube: &'a Cube,
-            face_iter: Box<dyn Iterator<Item=(usize, MapTile)> + 'a>,
-            face_idx: usize,
-            row_or_col: usize,
-            dir: Direction,
-        }
-        impl<'a> Iterator for CubeIter<'a> {
-            type Item = (CubePos, MapTile);
-            fn next(&mut self) -> Option<Self::Item> {
-                match self.face_iter.next() {
-                    Some((face_pos, MapTile::Open)) => return Some((CubePos{face_idx: self.face_idx, face_pos}, MapTile::Open)),
-                    Some((_, MapTile::Wall)) => return None,
-                    Some((_, MapTile::Empty)) => panic!("unexpected"),
-                    None => {},
-                }
-                let (next_face, next_row_or_col, next_dir) = self.cube.next_face(self.face_idx, self.row_or_col, self.dir);
-                self.face_iter = self.cube.face_iter(next_face, next_row_or_col, next_dir);
-                match self.face_iter.next() {
-                    Some((face_pos, MapTile::Open)) => {
-                        self.face_idx = next_face;
-                        self.row_or_col = next_row_or_col;
-                        self.dir = next_dir;
-                        return Some((CubePos{face_idx: self.face_idx, face_pos}, MapTile::Open));
+struct CubeIter<'a> {
+    cube: &'a Cube,
+    face_iter: Box<dyn Iterator<Item = (usize, MapTile)> + 'a>,
+    face_idx: usize,
+    row_or_col: usize,
+    dir: Direction,
+}
+impl<'a> Iterator for CubeIter<'a> {
+    type Item = (CubePos, MapTile);
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.face_iter.next() {
+            Some((face_pos, MapTile::Open)) => {
+                return Some((
+                    CubePos {
+                        face_idx: self.face_idx,
+                        face_pos,
                     },
-                    Some((_, MapTile::Wall)) => return None,
-                    Some((_, MapTile::Empty)) | None => panic!("unexpected"),
-                }
+                    MapTile::Open,
+                ))
             }
+            Some((_, MapTile::Wall)) => return None,
+            Some((_, MapTile::Empty)) => panic!("unexpected"),
+            None => {}
         }
+        let (next_face, next_row_or_col, next_dir) =
+            self.cube
+                .next_face(self.face_idx, self.row_or_col, self.dir);
+        self.face_iter = self.cube.face_iter(next_face, next_row_or_col, next_dir);
+        match self.face_iter.next() {
+            Some((face_pos, MapTile::Open)) => {
+                self.face_idx = next_face;
+                self.row_or_col = next_row_or_col;
+                self.dir = next_dir;
+                Some((
+                    CubePos {
+                        face_idx: self.face_idx,
+                        face_pos,
+                    },
+                    MapTile::Open,
+                ))
+            }
+            Some((_, MapTile::Wall)) => None,
+            Some((_, MapTile::Empty)) | None => panic!("unexpected"),
+        }
+    }
+}
 
-
-fn calculate_corner_coords(faces: &[Option<Vec<MapTile>>], width: usize) -> Vec<Option<FaceCoords>> {
+fn calculate_corner_coords(
+    faces: &[Option<Vec<MapTile>>],
+    width: usize,
+) -> Vec<Option<FaceCoords>> {
     enum NeighborRelation {
         Above,
         Left,
@@ -490,53 +529,52 @@ fn calculate_corner_coords(faces: &[Option<Vec<MapTile>>], width: usize) -> Vec<
         coords: &mut [Option<FaceCoords>],
         current: usize,
     ) {
-        if current >= width && faces[current - width].is_some() {
-            if coords[current - width].is_none() {
-                _fold(
-                    faces,
-                    coords,
-                    coords[current].clone().unwrap(),
-                    current - width,
-                    NeighborRelation::Below,
-                );
-                _fold_neighbors(faces, width, coords, current - width);
-            }
+        if current >= width && faces[current - width].is_some() && coords[current - width].is_none()
+        {
+            _fold(
+                faces,
+                coords,
+                coords[current].clone().unwrap(),
+                current - width,
+                NeighborRelation::Below,
+            );
+            _fold_neighbors(faces, width, coords, current - width);
         }
-        if current % width > 0 && faces[current - 1].is_some() {
-            if coords[current - 1].is_none() {
-                _fold(
-                    faces,
-                    coords,
-                    coords[current].clone().unwrap(),
-                    current - 1,
-                    NeighborRelation::Right,
-                );
-                _fold_neighbors(faces, width, coords, current - 1);
-            }
+        if current % width > 0 && faces[current - 1].is_some() && coords[current - 1].is_none() {
+            _fold(
+                faces,
+                coords,
+                coords[current].clone().unwrap(),
+                current - 1,
+                NeighborRelation::Right,
+            );
+            _fold_neighbors(faces, width, coords, current - 1);
         }
-        if current % width + 1 < width && faces[current + 1].is_some() {
-            if coords[current + 1].is_none() {
-                _fold(
-                    faces,
-                    coords,
-                    coords[current].clone().unwrap(),
-                    current + 1,
-                    NeighborRelation::Left,
-                );
-                _fold_neighbors(faces, width, coords, current + 1);
-            }
+        if current % width + 1 < width
+            && faces[current + 1].is_some()
+            && coords[current + 1].is_none()
+        {
+            _fold(
+                faces,
+                coords,
+                coords[current].clone().unwrap(),
+                current + 1,
+                NeighborRelation::Left,
+            );
+            _fold_neighbors(faces, width, coords, current + 1);
         }
-        if current + width < faces.len() && faces[current + width].is_some() {
-            if coords[current + width].is_none() {
-                _fold(
-                    faces,
-                    coords,
-                    coords[current].clone().unwrap(),
-                    current + width,
-                    NeighborRelation::Above,
-                );
-                _fold_neighbors(faces, width, coords, current + width);
-            }
+        if current + width < faces.len()
+            && faces[current + width].is_some()
+            && coords[current + width].is_none()
+        {
+            _fold(
+                faces,
+                coords,
+                coords[current].clone().unwrap(),
+                current + width,
+                NeighborRelation::Above,
+            );
+            _fold_neighbors(faces, width, coords, current + width);
         }
     }
     fn _fold(
@@ -558,28 +596,28 @@ fn calculate_corner_coords(faces: &[Option<Vec<MapTile>>], width: usize) -> Vec<
         };
         let current_coords = match neighbor_relation {
             NeighborRelation::Above => FaceCoords([
-                neighbor.bottom_left().clone(),
-                neighbor.bottom_right().clone(),
-                (neighbor.bottom_right().clone() + mask) % 2,
-                (neighbor.bottom_left().clone() + mask) % 2,
+                neighbor.bottom_left(),
+                neighbor.bottom_right(),
+                (neighbor.bottom_right() + mask) % 2,
+                (neighbor.bottom_left() + mask) % 2,
             ]),
             NeighborRelation::Left => FaceCoords([
-                neighbor.top_right().clone(),
-                (neighbor.top_right().clone() + mask) % 2,
-                (neighbor.bottom_right().clone() + mask) % 2,
-                neighbor.bottom_right().clone(),
+                neighbor.top_right(),
+                (neighbor.top_right() + mask) % 2,
+                (neighbor.bottom_right() + mask) % 2,
+                neighbor.bottom_right(),
             ]),
             NeighborRelation::Right => FaceCoords([
-                (neighbor.top_left().clone() + mask) % 2,
-                neighbor.top_left().clone(),
-                neighbor.bottom_left().clone(),
-                (neighbor.bottom_left().clone() + mask) % 2,
+                (neighbor.top_left() + mask) % 2,
+                neighbor.top_left(),
+                neighbor.bottom_left(),
+                (neighbor.bottom_left() + mask) % 2,
             ]),
             NeighborRelation::Below => FaceCoords([
-                (neighbor.top_left().clone() + mask) % 2,
-                (neighbor.top_right().clone() + mask) % 2,
-                neighbor.top_right().clone(),
-                neighbor.top_left().clone(),
+                (neighbor.top_left() + mask) % 2,
+                (neighbor.top_right() + mask) % 2,
+                neighbor.top_right(),
+                neighbor.top_left(),
             ]),
         };
         coords[current] = Some(current_coords);
@@ -621,9 +659,14 @@ pub fn part2(input: &str) -> usize {
         match step {
             Step::Walk(dist) => {
                 let mut iter = cube.cube_iter(pos, dir);
-                pos = iter.by_ref().take(dist).last().map(|(pos, _)| pos).unwrap_or(pos);
+                pos = iter
+                    .by_ref()
+                    .take(dist)
+                    .last()
+                    .map(|(pos, _)| pos)
+                    .unwrap_or(pos);
                 dir = iter.dir;
-            },
+            }
             Step::TurnLeft => {
                 dir = match dir {
                     Direction::Down => Direction::Right,
@@ -631,7 +674,7 @@ pub fn part2(input: &str) -> usize {
                     Direction::Left => Direction::Down,
                     Direction::Up => Direction::Left,
                 };
-            },
+            }
             Step::TurnRight => {
                 dir = match dir {
                     Direction::Down => Direction::Left,
@@ -639,10 +682,12 @@ pub fn part2(input: &str) -> usize {
                     Direction::Left => Direction::Up,
                     Direction::Up => Direction::Right,
                 };
-            },
+            }
         }
     }
-    let row = (pos.face_idx / cube.width_in_faces * cube.face_len + pos.face_pos / cube.face_len) + 1;
-    let col = (pos.face_idx % cube.width_in_faces * cube.face_len + pos.face_pos % cube.face_len) + 1;
+    let row =
+        (pos.face_idx / cube.width_in_faces * cube.face_len + pos.face_pos / cube.face_len) + 1;
+    let col =
+        (pos.face_idx % cube.width_in_faces * cube.face_len + pos.face_pos % cube.face_len) + 1;
     1000 * row + 4 * col + dir as usize
 }

@@ -8,8 +8,8 @@ use std::{
 use aoc_runner_derive::aoc;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-struct SNAFU(isize);
-impl Display for SNAFU {
+struct Snafu(isize);
+impl Display for Snafu {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut i = self.0;
         let mut s = Vec::new();
@@ -45,7 +45,7 @@ impl Display for SNAFU {
     }
 }
 
-impl FromStr for SNAFU {
+impl FromStr for Snafu {
     type Err = Infallible;
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
@@ -62,13 +62,13 @@ impl FromStr for SNAFU {
             sum *= 5;
             sum += b5_val;
         }
-        Ok(SNAFU(sum))
+        Ok(Snafu(sum))
     }
 }
 
-impl Sum for SNAFU {
+impl Sum for Snafu {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        SNAFU(iter.map(|snafu| snafu.0).sum())
+        Snafu(iter.map(|snafu| snafu.0).sum())
     }
 }
 
@@ -76,7 +76,7 @@ impl Sum for SNAFU {
 pub fn part1(input: &str) -> String {
     input
         .lines()
-        .map(|line| line.parse::<SNAFU>().unwrap())
-        .sum::<SNAFU>()
+        .map(|line| line.parse::<Snafu>().unwrap())
+        .sum::<Snafu>()
         .to_string()
 }

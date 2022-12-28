@@ -233,6 +233,5 @@ pub fn part2(input: &str) -> usize {
     let map: Map = input.parse().unwrap();
     let steps_to_finish = shortest_path(&map, 0, map.grid.len() - 1, 0);
     let steps_back_to_start = shortest_path(&map, map.grid.len() - 1, 0, steps_to_finish);
-    let steps_to_finish_again = shortest_path(&map, 0, map.grid.len() - 1, steps_back_to_start);
-    steps_to_finish_again
+    shortest_path(&map, 0, map.grid.len() - 1, steps_back_to_start)
 }

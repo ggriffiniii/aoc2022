@@ -264,6 +264,11 @@ impl RadixBitSet {
         self.len
     }
 
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn space_used(&self) -> usize {
         std::mem::size_of::<Self>()
             + match &self.state {
@@ -443,9 +448,7 @@ where
     }
 
     fn get_entry(&self, bit_idx: u32) -> Option<&ChildNode> {
-        self.0[((bit_idx & Self::MASK) >> Self::CHILD_MASK.trailing_ones()) as usize]
-            .as_ref()
-            .map(|x| &**x)
+        self.0[((bit_idx & Self::MASK) >> Self::CHILD_MASK.trailing_ones()) as usize].as_deref()
     }
 
     fn get_entry_mut(&mut self, bit_idx: u32) -> &mut Option<Box<ChildNode>> {
